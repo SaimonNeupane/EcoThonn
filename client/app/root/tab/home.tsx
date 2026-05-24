@@ -1,0 +1,720 @@
+import React from "react";
+import {
+  StyleSheet,
+  View,
+  ScrollView,
+  TouchableOpacity,
+  Alert,
+  Text,
+} from "react-native";
+import { useRouter } from "expo-router";
+import {
+  EarthyCard,
+  ThemeText,
+  HealthScoreGauge,
+  Colors,
+  useThemeColors,
+} from "../../../components/DesignSystem";
+import { Ionicons } from "@expo/vector-icons";
+
+// const { width } = Dimensions.get("window");
+
+export default function HomeScreen() {
+  const router = useRouter();
+  const themeColors = useThemeColors();
+
+  // MOCK DATA for interactive prototype
+  const recentScans = [
+    {
+      id: "1",
+      fieldName: "North Field",
+      date: "May 20, 2026",
+      score: 85,
+      type: "Sandy Loam",
+      icon: "leaf",
+    },
+    {
+      id: "2",
+      fieldName: "East Meadow",
+      date: "May 12, 2026",
+      score: 72,
+      type: "Clay Soil",
+      icon: "grid",
+    },
+    {
+      id: "3",
+      fieldName: "Orchard Hill",
+      date: "April 28, 2026",
+      score: 48,
+      type: "Silty Soil",
+      icon: "flower",
+    },
+  ];
+
+  const quickTips = [
+    {
+      id: "1",
+      title: "Nitrogen Boost",
+      text: "Rotate North Field with Soybeans next season to enrich nitrogen naturally.",
+      icon: "flask-outline",
+      color: "#42A5F5",
+    },
+    {
+      id: "2",
+      title: "Moisture Advisory",
+      text: "East Meadow is experiencing low water retention. Add organic compost.",
+      icon: "water-outline",
+      color: "#66BB6A",
+    },
+  ];
+
+  return (
+    <View style={[styles.container, { backgroundColor: themeColors.bg }]}>
+      {/* 1. WELCOME SECTION & HEADER */}
+      <View style={[styles.header, { borderBottomColor: themeColors.border }]}>
+        <View style={styles.userInfo}>
+          <View style={styles.avatarContainer}>
+            <Ionicons name="person" size={20} color={Colors.white} />
+          </View>
+          <View style={styles.headerText}>
+            <ThemeText category="caption">Welcome back,</ThemeText>
+            <ThemeText category="h2" style={styles.userName}>
+              Keshav Sharma
+            </ThemeText>
+          </View>
+        </View>
+
+        {/* Notification & Premium Badge */}
+        <View style={styles.headerActions}>
+          <TouchableOpacity
+            style={[
+              styles.actionIcon,
+              {
+                backgroundColor: themeColors.card,
+                borderColor: themeColors.border,
+              },
+            ]}
+            onPress={() => router.push("/premium")}
+          >
+            <Ionicons name="sparkles" size={18} color={Colors.accentYellow} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[
+              styles.actionIcon,
+              {
+                backgroundColor: themeColors.card,
+                borderColor: themeColors.border,
+              },
+            ]}
+            onPress={() =>
+              Alert.alert("Notifications", "You have no unread notifications.")
+            }
+          >
+            <Ionicons
+              name="notifications-outline"
+              size={18}
+              color={themeColors.text}
+            />
+            <View style={styles.dotIndicator} />
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={styles.scrollContent}
+      >
+        {/* 2. USER FARM SUMMARY */}
+        <View style={styles.farmSummaryRow}>
+          <View>
+            <ThemeText category="h3">Greenhouse Farm • Active</ThemeText>
+            <ThemeText category="caption">
+              📍 Central Valley, CA • 45 Acres
+            </ThemeText>
+          </View>
+          <View style={styles.statusBadge}>
+            <Text style={styles.statusText}>ALL OK</Text>
+          </View>
+        </View>
+
+        {/* 3. SOIL HEALTH OVERVIEW CARD & SCORE GAUGE */}
+        <EarthyCard style={styles.healthCard}>
+          <View style={styles.healthCardContent}>
+            <View style={styles.healthInfo}>
+              <ThemeText
+                category="label"
+                style={{ color: "rgba(255, 255, 255, 0.7)" }}
+              >
+                AVERAGE SOIL HEALTH
+              </ThemeText>
+              <ThemeText category="h1" style={styles.healthTitle}>
+                Optimal Zone
+              </ThemeText>
+              <ThemeText category="caption" style={styles.healthDescription}>
+                Based on your last 3 scans across all active sectors. Moisture
+                is high, nitrogen is recovering.
+              </ThemeText>
+              <TouchableOpacity
+                style={styles.detailsBtn}
+                onPress={() => router.push("/result")}
+              >
+                <Text style={styles.detailsBtnText}>View Last Report</Text>
+                <Ionicons
+                  name="arrow-forward"
+                  size={14}
+                  color={Colors.accentYellow}
+                />
+              </TouchableOpacity>
+            </View>
+
+            {/* Health score radial gauge */}
+            <View style={styles.gaugeWrapper}>
+              <HealthScoreGauge score={82} size={110} strokeWidth={8} />
+            </View>
+          </View>
+        </EarthyCard>
+
+        {/* 4. WEATHER WIDGET & IRRIGATION SUGGESTION */}
+        <EarthyCard style={styles.weatherCard}>
+          <View style={styles.weatherHeader}>
+            <View style={styles.weatherMain}>
+              <Ionicons
+                name="partly-sunny"
+                size={36}
+                color={Colors.accentYellow}
+              />
+              <View style={{ marginLeft: 12 }}>
+                <ThemeText category="h2">24°C</ThemeText>
+                <ThemeText category="caption">
+                  Mostly Sunny • Humidity: 42%
+                </ThemeText>
+              </View>
+            </View>
+            <View style={styles.tempBadge}>
+              <ThemeText
+                category="caption"
+                style={{ color: Colors.darkGreen, fontWeight: "700" }}
+              >
+                NO RAIN EXPECTED
+              </ThemeText>
+            </View>
+          </View>
+          <View
+            style={[
+              styles.weatherIrrigationTip,
+              { backgroundColor: themeColors.isDark ? "#172E1D" : "#E8F5E9" },
+            ]}
+          >
+            <Ionicons name="water-outline" size={18} color={Colors.darkGreen} />
+            <ThemeText category="caption" style={styles.irrigationText}>
+              <ThemeText
+                category="bodyBold"
+                style={{ color: Colors.darkGreen }}
+              >
+                Smart Irrigation Advice:{" "}
+              </ThemeText>
+              Run water supply on Sector 3 tomorrow at 6:00 AM (duration: 35
+              mins).
+            </ThemeText>
+          </View>
+        </EarthyCard>
+
+        {/* QUICK SHORTCUTS ROW */}
+        <ThemeText category="h3" style={styles.sectionTitle}>
+          Quick Analytics
+        </ThemeText>
+        <View style={styles.shortcutsRow}>
+          <TouchableOpacity
+            style={[
+              styles.shortcutBtn,
+              {
+                backgroundColor: themeColors.card,
+                borderColor: themeColors.border,
+              },
+            ]}
+            onPress={() => router.push("/crops")}
+          >
+            <View
+              style={[styles.shortcutIconBg, { backgroundColor: "#E8F5E9" }]}
+            >
+              <Ionicons name="leaf" size={20} color={Colors.darkGreen} />
+            </View>
+            <ThemeText category="bodyBold" style={{ marginTop: 6 }}>
+              Crops
+            </ThemeText>
+            <ThemeText category="caption">Matches</ThemeText>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[
+              styles.shortcutBtn,
+              {
+                backgroundColor: themeColors.card,
+                borderColor: themeColors.border,
+              },
+            ]}
+            onPress={() => router.push("/fertilizer")}
+          >
+            <View
+              style={[styles.shortcutIconBg, { backgroundColor: "#FFF3E0" }]}
+            >
+              <Ionicons name="flask" size={20} color="#E65100" />
+            </View>
+            <ThemeText category="bodyBold" style={{ marginTop: 6 }}>
+              Fertilizers
+            </ThemeText>
+            <ThemeText category="caption">Dosages</ThemeText>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[
+              styles.shortcutBtn,
+              {
+                backgroundColor: themeColors.card,
+                borderColor: themeColors.border,
+              },
+            ]}
+            onPress={() => router.push("/premium")}
+          >
+            <View
+              style={[styles.shortcutIconBg, { backgroundColor: "#E1F5FE" }]}
+            >
+              <Ionicons name="analytics" size={20} color="#0288D1" />
+            </View>
+            <ThemeText category="bodyBold" style={{ marginTop: 6 }}>
+              NDVI Map
+            </ThemeText>
+            <ThemeText category="caption">Satellite</ThemeText>
+          </TouchableOpacity>
+        </View>
+
+        {/* 5. RECENT SCANS CAROUSEL */}
+        <View style={styles.carouselHeader}>
+          <ThemeText category="h3" style={styles.sectionTitle}>
+            Recent Scans
+          </ThemeText>
+          <TouchableOpacity
+            onPress={() => router.replace("/root/tab/analytics")}
+          >
+            <ThemeText category="caption" style={styles.viewAllText}>
+              View History
+            </ThemeText>
+          </TouchableOpacity>
+        </View>
+
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.carouselContainer}
+        >
+          {recentScans.map((scan) => (
+            <EarthyCard
+              key={scan.id}
+              style={styles.recentScanCard}
+              onPress={() => router.push("/result")}
+            >
+              <View style={styles.scanCardTop}>
+                <View style={styles.scanIconBg}>
+                  <Ionicons
+                    name={scan.icon as any}
+                    size={18}
+                    color={Colors.darkGreen}
+                  />
+                </View>
+                <View
+                  style={[
+                    styles.scanScoreBadge,
+                    {
+                      backgroundColor:
+                        scan.score >= 80
+                          ? Colors.lightGreen + "20"
+                          : scan.score >= 60
+                            ? "#FFB30020"
+                            : "#FF704320",
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.scanScoreText,
+                      {
+                        color:
+                          scan.score >= 80
+                            ? Colors.darkGreen
+                            : scan.score >= 60
+                              ? "#FFB300"
+                              : "#FF7043",
+                      },
+                    ]}
+                  >
+                    {scan.score}%
+                  </Text>
+                </View>
+              </View>
+
+              <ThemeText category="bodyBold" style={styles.scanFieldName}>
+                {scan.fieldName}
+              </ThemeText>
+              <ThemeText category="caption">{scan.type}</ThemeText>
+              <View style={styles.scanCardFooter}>
+                <Ionicons
+                  name="calendar-outline"
+                  size={12}
+                  color={themeColors.subText}
+                />
+                <ThemeText category="caption" style={{ marginLeft: 4 }}>
+                  {scan.date}
+                </ThemeText>
+              </View>
+            </EarthyCard>
+          ))}
+        </ScrollView>
+
+        {/* 6. AI RECOMMENDATIONS & TIPS */}
+        <ThemeText category="h3" style={styles.sectionTitle}>
+          AI Smart Recommendations
+        </ThemeText>
+        {quickTips.map((tip) => (
+          <EarthyCard key={tip.id} style={styles.tipCard}>
+            <View style={styles.tipCardRow}>
+              <View
+                style={[
+                  styles.tipIconCircle,
+                  { backgroundColor: tip.color + "15" },
+                ]}
+              >
+                <Ionicons name={tip.icon as any} size={22} color={tip.color} />
+              </View>
+              <View style={styles.tipInfo}>
+                <ThemeText category="bodyBold" style={{ color: tip.color }}>
+                  {tip.title}
+                </ThemeText>
+                <ThemeText category="caption" style={styles.tipText}>
+                  {tip.text}
+                </ThemeText>
+              </View>
+            </View>
+          </EarthyCard>
+        ))}
+
+        {/* 7. SEASONAL FARMING TIPS */}
+        <EarthyCard style={styles.seasonalTipsCard}>
+          <ThemeText category="h3" style={{ color: Colors.white }}>
+            Summer Farming Checklist
+          </ThemeText>
+          <ThemeText category="caption" style={styles.seasonalTipSub}>
+            Maximize your summer crop harvests
+          </ThemeText>
+          <View style={styles.seasonalBulletRow}>
+            <Ionicons name="checkbox" size={16} color={Colors.accentYellow} />
+            <ThemeText category="body" style={styles.bulletText}>
+              Maintain mulch layers to reduce water loss
+            </ThemeText>
+          </View>
+          <View style={styles.seasonalBulletRow}>
+            <Ionicons name="checkbox" size={16} color={Colors.accentYellow} />
+            <ThemeText category="body" style={styles.bulletText}>
+              Monitor phosphorus runoffs before heavy waterings
+            </ThemeText>
+          </View>
+        </EarthyCard>
+      </ScrollView>
+
+      {/* Floating Scan Button Mock overlay (to show on Dashboard, triggers Scan routing) */}
+      <TouchableOpacity
+        style={styles.floatingScanButton}
+        onPress={() => router.replace("/root/tab/scan")}
+      >
+        <Ionicons name="scan" size={24} color={Colors.white} />
+      </TouchableOpacity>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+  },
+  header: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingHorizontal: 24,
+    paddingTop: 56,
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+  },
+  userInfo: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  avatarContainer: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: Colors.darkGreen,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  headerText: {
+    marginLeft: 12,
+  },
+  userName: {
+    fontSize: 16,
+    fontWeight: "800",
+  },
+  headerActions: {
+    flexDirection: "row",
+  },
+  actionIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    marginLeft: 10,
+    position: "relative",
+  },
+  dotIndicator: {
+    position: "absolute",
+    top: 10,
+    right: 10,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: Colors.accentOrange,
+  },
+  scrollContent: {
+    paddingHorizontal: 24,
+    paddingTop: 16,
+    paddingBottom: 100, // Margin for floating button and tabs
+  },
+  farmSummaryRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 16,
+  },
+  statusBadge: {
+    backgroundColor: Colors.lightGreen,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
+  statusText: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: Colors.white,
+  },
+  healthCard: {
+    backgroundColor: Colors.darkGreen,
+    borderRadius: 24,
+    padding: 20,
+    marginBottom: 20,
+  },
+  healthCardContent: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  healthInfo: {
+    flex: 1,
+    paddingRight: 8,
+  },
+  healthTitle: {
+    color: Colors.white,
+    fontWeight: "900",
+    fontSize: 22,
+    marginVertical: 4,
+  },
+  healthDescription: {
+    color: "rgba(255, 255, 255, 0.75)",
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  detailsBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 12,
+  },
+  detailsBtnText: {
+    color: Colors.accentYellow,
+    fontSize: 13,
+    fontWeight: "700",
+    marginRight: 6,
+  },
+  gaugeWrapper: {
+    marginLeft: 12,
+  },
+  weatherCard: {
+    padding: 16,
+    borderRadius: 20,
+    marginBottom: 20,
+  },
+  weatherHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  weatherMain: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  tempBadge: {
+    backgroundColor: "#FFB30015",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
+  weatherIrrigationTip: {
+    marginTop: 16,
+    borderRadius: 12,
+    padding: 12,
+    flexDirection: "row",
+    alignItems: "flex-start",
+  },
+  irrigationText: {
+    marginLeft: 8,
+    flex: 1,
+    lineHeight: 16,
+  },
+  sectionTitle: {
+    marginVertical: 12,
+    fontWeight: "800",
+  },
+  shortcutsRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: 20,
+  },
+  shortcutBtn: {
+    flex: 1,
+    borderRadius: 16,
+    borderWidth: 1,
+    padding: 12,
+    alignItems: "center",
+    marginHorizontal: 4,
+  },
+  shortcutIconBg: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  carouselHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  viewAllText: {
+    color: Colors.darkGreen,
+    fontWeight: "700",
+  },
+  carouselContainer: {
+    paddingVertical: 8,
+    paddingRight: 24,
+    marginBottom: 16,
+  },
+  recentScanCard: {
+    width: 140,
+    padding: 14,
+    marginRight: 12,
+    borderRadius: 16,
+  },
+  scanCardTop: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 12,
+  },
+  scanIconBg: {
+    width: 32,
+    height: 32,
+    borderRadius: 10,
+    backgroundColor: Colors.lightGreen + "15",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  scanScoreBadge: {
+    borderRadius: 8,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  scanScoreText: {
+    fontSize: 9,
+    fontWeight: "700",
+  },
+  scanFieldName: {
+    fontSize: 13,
+    marginBottom: 2,
+  },
+  scanCardFooter: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 8,
+  },
+  tipCard: {
+    padding: 14,
+    borderRadius: 16,
+    marginVertical: 4,
+  },
+  tipCardRow: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  tipIconCircle: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  tipInfo: {
+    flex: 1,
+    marginLeft: 12,
+  },
+  tipText: {
+    marginTop: 2,
+    lineHeight: 16,
+  },
+  seasonalTipsCard: {
+    backgroundColor: Colors.brown,
+    borderRadius: 24,
+    padding: 20,
+    marginTop: 16,
+  },
+  seasonalTipSub: {
+    color: "rgba(255, 255, 255, 0.7)",
+    marginBottom: 12,
+    fontWeight: "600",
+  },
+  seasonalBulletRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginVertical: 4,
+  },
+  bulletText: {
+    color: Colors.white,
+    marginLeft: 8,
+    fontSize: 12,
+  },
+  floatingScanButton: {
+    position: "absolute",
+    bottom: 24,
+    right: 24,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: Colors.darkGreen,
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: Colors.darkGreen,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.3,
+    shadowRadius: 10,
+    elevation: 6,
+    zIndex: 10,
+  },
+});
