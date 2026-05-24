@@ -1,0 +1,14 @@
+# Environments
+env/
+.env
+
+# Byte-compiled / optimized
+__pycache__/
+*.py[cod]
+
+# PyTorch / Machine Learning models
+*.pth
+*.pt
+
+# OS generated files
+.DS_Store
