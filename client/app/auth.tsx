@@ -16,8 +16,10 @@ import {
   EarthyButton,
   EarthyInput,
   Colors,
+  AILoadingAnimation,
 } from "../components/DesignSystem";
 import { Ionicons } from "@expo/vector-icons";
+import { useLocation } from "../hooks/useLocation";
 
 // Authentication screen for login, signup, and password reset
 type AuthMode = "login" | "signup" | "forgot";
@@ -25,6 +27,21 @@ type AuthMode = "login" | "signup" | "forgot";
 export default function AuthScreen() {
   const router = useRouter();
   const [mode, setMode] = useState<AuthMode>("login");
+  const { fetchLocation } = useLocation();
+  const [isLocationLoading, setIsLocationLoading] = useState(false);
+
+  // Helper to fetch location and complete login flow
+  const completeLogin = async () => {
+    setIsLocationLoading(true);
+    try {
+      await fetchLocation();
+    } catch (e) {
+      console.warn("Failed to fetch location on login:", e);
+    } finally {
+      setIsLocationLoading(false);
+      router.replace("/root/tab/home");
+    }
+  };
 
   // Form fields
   const [name, setName] = useState("");
@@ -35,14 +52,13 @@ export default function AuthScreen() {
   const [showOtpModal, setShowOtpModal] = useState(false);
   const [otpCode, setOtpCode] = useState("");
 
-  const handleAuthAction = () => {
+  const handleAuthAction = async () => {
     if (mode === "login") {
       if (!email || !password) {
         Alert.alert("Error", "Please fill in all fields.");
         return;
       }
-      // Success simulation -> redirects to app dashboard
-      router.replace("/root/tab/home");
+      await completeLogin();
     } else if (mode === "signup") {
       if (!name || !email || !password) {
         Alert.alert("Error", "Please fill in all fields.");
@@ -63,15 +79,30 @@ export default function AuthScreen() {
     }
   };
 
-  const handleOtpVerify = () => {
+  const handleOtpVerify = async () => {
     if (otpCode.length < 4) {
       Alert.alert("Verification Code", "Please enter the 4-digit code.");
       return;
     }
     setShowOtpModal(false);
-    // Success simulation -> redirects to app dashboard
-    router.replace("/root/tab/home");
+    await completeLogin();
   };
+
+  if (isLocationLoading) {
+    return (
+      <View style={[styles.locationLoadingContainer, { backgroundColor: Colors.background }]}>
+        <View style={styles.locationPulseContainer}>
+          <AILoadingAnimation size={90} />
+        </View>
+        <ThemeText category="h1" style={styles.locationLoadingTitle}>
+          Syncing Field Context
+        </ThemeText>
+        <ThemeText category="body" style={styles.locationLoadingBody}>
+          Locating your field coordinates to fetch regional climate data and soil models.
+        </ThemeText>
+      </View>
+    );
+  }
 
   return (
     <KeyboardAvoidingView
@@ -214,14 +245,14 @@ export default function AuthScreen() {
 
           {/* Social Logins */}
           <View style={styles.socialRow}>
-            <TouchableOpacity style={styles.socialBtn}>
+            <TouchableOpacity style={styles.socialBtn} onPress={completeLogin}>
               <Ionicons name="logo-google" size={20} color="#EA4335" />
               <ThemeText category="bodyBold" style={styles.socialBtnText}>
                 Google
               </ThemeText>
             </TouchableOpacity>
 
-            <TouchableOpacity style={styles.socialBtn}>
+            <TouchableOpacity style={styles.socialBtn} onPress={completeLogin}>
               <Ionicons name="logo-apple" size={20} color="#000000" />
               <ThemeText category="bodyBold" style={styles.socialBtnText}>
                 Apple
@@ -491,5 +522,26 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginTop: 16,
     paddingVertical: 8,
+  },
+  locationLoadingContainer: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 36,
+  },
+  locationPulseContainer: {
+    marginBottom: 32,
+  },
+  locationLoadingTitle: {
+    fontWeight: "900",
+    color: Colors.darkGreen,
+    textAlign: "center",
+    marginBottom: 12,
+  },
+  locationLoadingBody: {
+    textAlign: "center",
+    lineHeight: 20,
+    color: Colors.textSecondary,
+    maxWidth: 300,
   },
 });

@@ -16,12 +16,14 @@ import {
   useThemeColors,
 } from "../../../components/DesignSystem";
 import { Ionicons } from "@expo/vector-icons";
+import { useLocation } from "../../../hooks/useLocation";
 
 // const { width } = Dimensions.get("window");
 
 export default function HomeScreen() {
   const router = useRouter();
   const themeColors = useThemeColors();
+  const { location } = useLocation();
 
   // MOCK DATA for interactive prototype
   const recentScans = [
@@ -129,7 +131,7 @@ export default function HomeScreen() {
           <View>
             <ThemeText category="h3">Greenhouse Farm • Active</ThemeText>
             <ThemeText category="caption">
-              📍 Central Valley, CA • 45 Acres
+              📍 {location ? `${location.latitude.toFixed(4)}° N, ${location.longitude.toFixed(4)}° W` : "Central Valley, CA"} • 45 Acres
             </ThemeText>
           </View>
           <View style={styles.statusBadge}>

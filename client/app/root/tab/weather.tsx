@@ -14,10 +14,12 @@ import {
   useThemeColors,
 } from "../../../components/DesignSystem";
 import { Ionicons } from "@expo/vector-icons";
+import { useLocation } from "../../../hooks/useLocation";
 
 export default function WeatherScreen() {
   // const router = useRouter();
   const themeColors = useThemeColors();
+  const { location } = useLocation();
 
   // Mock forecast data
   const forecast5Day = [
@@ -93,7 +95,7 @@ export default function WeatherScreen() {
                   category="caption"
                   style={{ color: "rgba(255,255,255,0.7)" }}
                 >
-                  Feels like 26°C
+                  Feels like 26°C • 📍 {location ? `${location.latitude.toFixed(4)}° N, ${location.longitude.toFixed(4)}° W` : "Central Valley, CA"}
                 </ThemeText>
               </View>
             </View>

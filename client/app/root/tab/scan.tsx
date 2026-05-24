@@ -303,49 +303,49 @@ export default function ScanScreen() {
             facing={facing}
             flash={flash as FlashMode}
             onCameraReady={() => setCameraReady(true)}
-          >
-            {/* Dark overlay at top */}
-            <View style={styles.topOverlay} />
+          />
 
-            {/* Flash hint toast */}
-            {showFlashHint && (
-              <View style={styles.flashHint}>
-                <Ionicons
-                  name={FLASH_ICONS[flash]}
-                  size={14}
-                  color={Colors.white}
-                />
-                <ThemeText category="caption" style={styles.flashHintText}>
-                  Flash: {FLASH_LABELS[flash]}
-                </ThemeText>
-              </View>
-            )}
+          {/* Dark overlay at top */}
+          <View style={styles.topOverlay} />
 
-            {/* Scan target frame */}
-            <View style={styles.targetFrame}>
-              {/* Corner brackets */}
-              <View style={[styles.corner, styles.cornerTL, { borderColor: Colors.lightGreen }]} />
-              <View style={[styles.corner, styles.cornerTR, { borderColor: Colors.lightGreen }]} />
-              <View style={[styles.corner, styles.cornerBL, { borderColor: Colors.lightGreen }]} />
-              <View style={[styles.corner, styles.cornerBR, { borderColor: Colors.lightGreen }]} />
-
-              {/* Crosshair */}
-              <View style={styles.crosshairH} />
-              <View style={styles.crosshairV} />
-              <View style={[styles.centerRing, { borderColor: Colors.lightGreen }]} />
-
-              {/* Animated scan line */}
-              <Animated.View
-                style={[
-                  styles.scanLine,
-                  { transform: [{ translateY: scanLineY }] },
-                ]}
+          {/* Flash hint toast */}
+          {showFlashHint && (
+            <View style={styles.flashHint}>
+              <Ionicons
+                name={FLASH_ICONS[flash]}
+                size={14}
+                color={Colors.white}
               />
+              <ThemeText category="caption" style={styles.flashHintText}>
+                Flash: {FLASH_LABELS[flash]}
+              </ThemeText>
             </View>
+          )}
 
-            {/* Bottom overlay */}
-            <View style={styles.bottomOverlay} />
-          </CameraView>
+          {/* Scan target frame */}
+          <View style={styles.targetFrame}>
+            {/* Corner brackets */}
+            <View style={[styles.corner, styles.cornerTL, { borderColor: Colors.lightGreen }]} />
+            <View style={[styles.corner, styles.cornerTR, { borderColor: Colors.lightGreen }]} />
+            <View style={[styles.corner, styles.cornerBL, { borderColor: Colors.lightGreen }]} />
+            <View style={[styles.corner, styles.cornerBR, { borderColor: Colors.lightGreen }]} />
+
+            {/* Crosshair */}
+            <View style={styles.crosshairH} />
+            <View style={styles.crosshairV} />
+            <View style={[styles.centerRing, { borderColor: Colors.lightGreen }]} />
+
+            {/* Animated scan line */}
+            <Animated.View
+              style={[
+                styles.scanLine,
+                { transform: [{ translateY: scanLineY }] },
+              ]}
+            />
+          </View>
+
+          {/* Bottom overlay */}
+          <View style={styles.bottomOverlay} />
 
           {/* Guidance text */}
           <View style={styles.guidanceRow}>
