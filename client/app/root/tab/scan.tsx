@@ -9,6 +9,8 @@ import {
   StatusBar,
   Image,
   Dimensions,
+
+  Text
 } from "react-native";
 import { useRouter } from "expo-router";
 import { CameraView, useCameraPermissions, FlashMode } from "expo-camera";
@@ -21,9 +23,9 @@ import {
 } from "../../../components/DesignSystem";
 import { Ionicons } from "@expo/vector-icons";
 
-const { width, height } = Dimensions.get("window");
+const { width } = Dimensions.get("window");
+const BACKEND_URL = "http://192.168.76.201:8000/infer";
 
-// ─── Flash mode cycle: off → on → auto ──────────────────────────────────────
 type FlashState = "off" | "on" | "auto";
 
 const FLASH_ICONS: Record<FlashState, keyof typeof Ionicons.glyphMap> = {
@@ -38,16 +40,22 @@ const FLASH_LABELS: Record<FlashState, string> = {
 };
 const FLASH_CYCLE: FlashState[] = ["off", "on", "auto"];
 
+// Scan step definitions with progress values
+const SCAN_STEPS = [
+  { text: "Uploading soil sample…", progress: 15 },
+  { text: "Preprocessing image…", progress: 35 },
+  { text: "Running EfficientNet-b0…", progress: 60 },
+  { text: "Analyzing NPK profile…", progress: 80 },
+  { text: "Generating soil report…", progress: 95 },
+];
+
 export default function ScanScreen() {
   const router = useRouter();
   const themeColors = useThemeColors();
 
-  // ── Camera permission ──────────────────────────────────────────────────────
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
-
-  // ── State ──────────────────────────────────────────────────────────────────
   const [isScanning, setIsScanning] = useState(false);
-  const [scanStepText, setScanStepText] = useState("Initializing sensors...");
+  const [scanStepIndex, setScanStepIndex] = useState(0);
   const [scanProgress, setScanProgress] = useState(0);
   const [flash, setFlash] = useState<FlashState>("off");
   const [facing, setFacing] = useState<"back" | "front">("back");
@@ -55,25 +63,27 @@ export default function ScanScreen() {
   const [cameraReady, setCameraReady] = useState(false);
   const [showFlashHint, setShowFlashHint] = useState(false);
 
-  // ── Refs ───────────────────────────────────────────────────────────────────
   const cameraRef = useRef<CameraView>(null);
   const scanLineY = useRef(new Animated.Value(0)).current;
-  const overlayOpacity = useRef(new Animated.Value(0)).current;
   const captureRing = useRef(new Animated.Value(1)).current;
+  const progressAnim = useRef(new Animated.Value(0)).current;
+  const overlayAnim = useRef(new Animated.Value(0)).current;
+  const stepFadeAnim = useRef(new Animated.Value(1)).current;
+  const stepTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // ── Scan-line loop (visible when NOT scanning) ─────────────────────────────
+  // Scan-line loop
   useEffect(() => {
     if (!isScanning && !capturedImageUri) {
       const loop = Animated.loop(
         Animated.sequence([
           Animated.timing(scanLineY, {
-            toValue: 240,
-            duration: 1800,
+            toValue: FRAME_SIZE - 3,
+            duration: 2000,
             useNativeDriver: true,
           }),
           Animated.timing(scanLineY, {
             toValue: 0,
-            duration: 1800,
+            duration: 2000,
             useNativeDriver: true,
           }),
         ])
@@ -81,77 +91,169 @@ export default function ScanScreen() {
       loop.start();
       return () => loop.stop();
     }
-  }, [isScanning, capturedImageUri, scanLineY]);
+  }, [isScanning, capturedImageUri]);
 
-  // ── Capture-ring pulse animation ───────────────────────────────────────────
+  // Cleanup step timer on unmount
+  useEffect(() => {
+    return () => {
+      if (stepTimerRef.current) clearInterval(stepTimerRef.current);
+    };
+  }, []);
+
+  const animateProgress = useCallback(
+    (toValue: number) => {
+      Animated.timing(progressAnim, {
+        toValue,
+        duration: 600,
+        useNativeDriver: false,
+      }).start();
+    },
+    [progressAnim]
+  );
+
+  const cycleStepText = useCallback(() => {
+    let idx = 0;
+    setScanStepIndex(0);
+    stepTimerRef.current = setInterval(() => {
+      idx = (idx + 1) % SCAN_STEPS.length;
+      // Fade out → update → fade in
+      Animated.timing(stepFadeAnim, {
+        toValue: 0,
+        duration: 200,
+        useNativeDriver: true,
+      }).start(() => {
+        setScanStepIndex(idx);
+        Animated.timing(stepFadeAnim, {
+          toValue: 1,
+          duration: 200,
+          useNativeDriver: true,
+        }).start();
+      });
+    }, 1400);
+  }, [stepFadeAnim]);
+
   const pulseCapture = useCallback(() => {
     Animated.sequence([
-      Animated.timing(captureRing, {
-        toValue: 1.2,
-        duration: 120,
-        useNativeDriver: true,
-      }),
-      Animated.timing(captureRing, {
-        toValue: 1,
-        duration: 120,
-        useNativeDriver: true,
-      }),
+      Animated.timing(captureRing, { toValue: 1.18, duration: 100, useNativeDriver: true }),
+      Animated.timing(captureRing, { toValue: 1, duration: 100, useNativeDriver: true }),
     ]).start();
   }, [captureRing]);
 
-  // ── AI scanning simulation (same steps as before) ─────────────────────────
+  const resetScanState = useCallback(() => {
+    if (stepTimerRef.current) {
+      clearInterval(stepTimerRef.current);
+      stepTimerRef.current = null;
+    }
+    setIsScanning(false);
+    setCapturedImageUri(null);
+    setScanProgress(0);
+    progressAnim.setValue(0);
+  }, [progressAnim]);
+
   const runAIScan = useCallback(
-    (imageUri: string) => {
+    async (imageUri: string) => {
       setIsScanning(true);
       setScanProgress(0);
+      progressAnim.setValue(0);
       setCapturedImageUri(imageUri);
 
-      // Fade-in overlay with preview image
-      Animated.timing(overlayOpacity, {
+      // Fade in scanning overlay
+      Animated.timing(overlayAnim, {
         toValue: 1,
-        duration: 400,
+        duration: 350,
         useNativeDriver: true,
       }).start();
 
-      const steps = [
-        { text: "Capturing soil reflectance index...", delay: 0, progress: 20 },
-        {
-          text: "Analyzing soil coloration spectrum...",
-          delay: 900,
-          progress: 45,
-        },
-        {
-          text: "Extracting moisture reflections...",
-          delay: 1800,
-          progress: 70,
-        },
-        {
-          text: "Estimating NPK concentrations...",
-          delay: 2700,
-          progress: 90,
-        },
-        { text: "Compiling diagnostic model...", delay: 3600, progress: 100 },
-      ];
+      // Start cycling step text
+      cycleStepText();
 
-      steps.forEach((step) => {
+      try {
+        animateProgress(15);
+
+        const formData = new FormData();
+        formData.append("file", {
+          uri: imageUri,
+          name: "soil_sample.jpg",
+          type: "image/jpeg",
+        } as any);
+
+        animateProgress(55);
+
+        const response = await fetch(BACKEND_URL, {
+          method: "POST",
+          body: formData,
+        });
+
+        if (!response.ok) {
+          throw new Error(`Server error ${response.status}. Check your connection.`);
+        }
+
+        const data = await response.json();
+        console.log("Inference result:", data);
+
+        animateProgress(90);
+
+        if (!data.success || !data.prediction || data.prediction === "Unknown") {
+          throw new Error(
+            data.error || "Could not identify the soil type. Try better lighting or a closer shot."
+          );
+        }
+
+        animateProgress(100);
+        setScanProgress(100);
+
+        // Clean up prediction string ("Red_Soil" → "Red Soil")
+        const formattedPrediction = data.prediction.replace(/_/g, " ");
+
         setTimeout(() => {
-          setScanStepText(step.text);
-          setScanProgress(step.progress);
+          if (stepTimerRef.current) clearInterval(stepTimerRef.current);
+          setIsScanning(false);
+          setCapturedImageUri(null);
 
-          if (step.progress === 100) {
-            setTimeout(() => {
-              setIsScanning(false);
-              setCapturedImageUri(null);
-              router.push("/result");
-            }, 700);
-          }
-        }, step.delay);
-      });
+          router.push({
+            pathname: "/result",
+            params: {
+              prediction: formattedPrediction,
+              confidence: data.confidence_score,
+              imageUri: imageUri,
+              lowConfidence: data.low_confidence ? "true" : "false",
+            },
+          });
+        }, 900);
+      } catch (error: any) {
+        console.error("Inference Error:", error);
+        resetScanState();
+
+        const msg: string = error.message ?? "Something went wrong. Please try again.";
+
+        // Distinguish network errors from model errors
+        const isNetworkError =
+          msg.includes("Network request failed") ||
+          msg.includes("fetch") ||
+          msg.includes("Server error");
+
+        Alert.alert(
+          isNetworkError ? "Connection Error" : "Analysis Failed",
+          isNetworkError
+            ? "Could not reach the AI server. Make sure your backend is running and both devices are on the same network."
+            : msg,
+          [
+            {
+              text: "Try Again",
+              onPress: () => { },
+            },
+            {
+              text: "Pick Different Image",
+              onPress: pickFromGallery,
+              style: "default",
+            },
+          ]
+        );
+      }
     },
-    [overlayOpacity, router]
+    [animateProgress, cycleStepText, overlayAnim, resetScanState, router]
   );
 
-  // ── Take photo from camera ─────────────────────────────────────────────────
   const takePicture = useCallback(async () => {
     if (!cameraRef.current || !cameraReady) {
       Alert.alert("Camera not ready", "Please wait a moment and try again.");
@@ -160,61 +262,48 @@ export default function ScanScreen() {
     pulseCapture();
     try {
       const photo = await cameraRef.current.takePictureAsync({
-        quality: 0.8,
+        quality: 0.85,
         base64: false,
         skipProcessing: false,
       });
-      if (photo?.uri) {
-        runAIScan(photo.uri);
-      }
+      if (photo?.uri) runAIScan(photo.uri);
     } catch (err: any) {
       Alert.alert("Capture Error", err.message ?? "Failed to take photo.");
     }
   }, [cameraReady, pulseCapture, runAIScan]);
 
-  // ── Pick image from gallery ────────────────────────────────────────────────
   const pickFromGallery = useCallback(async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== "granted") {
-      Alert.alert(
-        "Permission Required",
-        "Please allow access to your photo library in Settings.",
-        [{ text: "OK" }]
-      );
+      Alert.alert("Permission Required", "Allow photo library access in Settings.");
       return;
     }
-
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ["images"],
       allowsEditing: true,
       aspect: [1, 1],
       quality: 0.85,
     });
-
     if (!result.canceled && result.assets.length > 0) {
       runAIScan(result.assets[0].uri);
     }
   }, [runAIScan]);
 
-  // ── Cycle flash mode ───────────────────────────────────────────────────────
   const cycleFlash = useCallback(() => {
     setFlash((prev) => {
       const idx = FLASH_CYCLE.indexOf(prev);
-      const next = FLASH_CYCLE[(idx + 1) % FLASH_CYCLE.length];
-      return next;
+      return FLASH_CYCLE[(idx + 1) % FLASH_CYCLE.length];
     });
     setShowFlashHint(true);
-    setTimeout(() => setShowFlashHint(false), 1500);
+    setTimeout(() => setShowFlashHint(false), 1600);
   }, []);
 
-  // ── Flip camera ────────────────────────────────────────────────────────────
   const flipCamera = useCallback(() => {
     setFacing((f) => (f === "back" ? "front" : "back"));
   }, []);
 
-  // ── Permission gate ────────────────────────────────────────────────────────
+  // ── Permission loading ────────────────────────────────────────────────────
   if (!cameraPermission) {
-    // Still loading permission status
     return (
       <View style={[styles.permissionContainer, { backgroundColor: themeColors.bg }]}>
         <AILoadingAnimation size={60} />
@@ -225,6 +314,7 @@ export default function ScanScreen() {
     );
   }
 
+  // ── Permission denied ────────────────────────────────────────────────────
   if (!cameraPermission.granted) {
     return (
       <View style={[styles.permissionContainer, { backgroundColor: themeColors.bg }]}>
@@ -235,8 +325,8 @@ export default function ScanScreen() {
           Camera Access Required
         </ThemeText>
         <ThemeText category="body" style={styles.permissionBody}>
-          SoilSense AI needs your camera to scan soil samples and run AI
-          diagnostics. Your images are processed locally.
+          SoilSense AI needs your camera to scan soil samples. Your images are
+          processed on-device and never stored.
         </ThemeText>
         <TouchableOpacity
           style={styles.permissionBtn}
@@ -262,12 +352,18 @@ export default function ScanScreen() {
     );
   }
 
+  const progressWidth = progressAnim.interpolate({
+    inputRange: [0, 100],
+    outputRange: ["0%", "100%"],
+    extrapolate: "clamp",
+  });
+
   // ── Main render ────────────────────────────────────────────────────────────
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" />
 
-      {/* ── HEADER ────────────────────────────────────────────────────── */}
+      {/* ── HEADER ──────────────────────────────────────────────────────── */}
       <View style={styles.header}>
         <TouchableOpacity
           style={styles.headerBtn}
@@ -276,16 +372,19 @@ export default function ScanScreen() {
           <Ionicons name="close" size={22} color={Colors.white} />
         </TouchableOpacity>
 
-        <ThemeText category="h2" style={styles.headerTitle}>
-          Soil Analyzer
-        </ThemeText>
+        <View style={styles.headerCenter}>
+          <View style={styles.headerDot} />
+          <ThemeText category="h2" style={styles.headerTitle}>
+            Soil Analyzer
+          </ThemeText>
+        </View>
 
         <TouchableOpacity
           style={styles.headerBtn}
           onPress={() =>
             Alert.alert(
-              "Scan Tips",
-              "• Hold the camera 20–30 cm above the soil\n• Ensure even natural lighting\n• Fill the frame with soil sample\n• Avoid shadows on the sample"
+              "📸 Scan Tips",
+              "• Hold camera 20–30 cm above soil\n• Use even, natural lighting\n• Fill the frame with the sample\n• Avoid shadows and glare\n• Keep camera steady when shooting"
             )
           }
         >
@@ -294,9 +393,8 @@ export default function ScanScreen() {
       </View>
 
       {!isScanning ? (
-        // ── CAMERA / VIEWFINDER STATE ────────────────────────────────────
+        // ── CAMERA VIEWFINDER ───────────────────────────────────────────
         <View style={styles.cameraWrapper}>
-          {/* Live Camera */}
           <CameraView
             ref={cameraRef}
             style={styles.camera}
@@ -305,206 +403,192 @@ export default function ScanScreen() {
             onCameraReady={() => setCameraReady(true)}
           />
 
-          {/* Dark overlay at top */}
+          {/* Vignette overlays */}
           <View style={styles.topOverlay} />
+          <View style={styles.bottomOverlay} />
+          <View style={styles.leftOverlay} />
+          <View style={styles.rightOverlay} />
 
           {/* Flash hint toast */}
           {showFlashHint && (
-            <View style={styles.flashHint}>
-              <Ionicons
-                name={FLASH_ICONS[flash]}
-                size={14}
-                color={Colors.white}
-              />
-              <ThemeText category="caption" style={styles.flashHintText}>
-                Flash: {FLASH_LABELS[flash]}
-              </ThemeText>
-            </View>
+            <Animated.View style={styles.flashHint}>
+              <Ionicons name={FLASH_ICONS[flash]} size={13} color={Colors.white} />
+              <Text style={styles.flashHintText}>Flash {FLASH_LABELS[flash]}</Text>
+            </Animated.View>
           )}
 
-          {/* Scan target frame */}
+          {/* ── SCAN TARGET FRAME ─────────────────────────────────────── */}
           <View style={styles.targetFrame}>
-            {/* Corner brackets */}
-            <View style={[styles.corner, styles.cornerTL, { borderColor: Colors.lightGreen }]} />
-            <View style={[styles.corner, styles.cornerTR, { borderColor: Colors.lightGreen }]} />
-            <View style={[styles.corner, styles.cornerBL, { borderColor: Colors.lightGreen }]} />
-            <View style={[styles.corner, styles.cornerBR, { borderColor: Colors.lightGreen }]} />
+            {/* Corners */}
+            <View style={[styles.corner, styles.cornerTL]} />
+            <View style={[styles.corner, styles.cornerTR]} />
+            <View style={[styles.corner, styles.cornerBL]} />
+            <View style={[styles.corner, styles.cornerBR]} />
 
-            {/* Crosshair */}
+            {/* Center reticle */}
             <View style={styles.crosshairH} />
             <View style={styles.crosshairV} />
-            <View style={[styles.centerRing, { borderColor: Colors.lightGreen }]} />
+            <View style={styles.centerRing} />
 
             {/* Animated scan line */}
             <Animated.View
-              style={[
-                styles.scanLine,
-                { transform: [{ translateY: scanLineY }] },
-              ]}
+              style={[styles.scanLine, { transform: [{ translateY: scanLineY }] }]}
             />
           </View>
 
-          {/* Bottom overlay */}
-          <View style={styles.bottomOverlay} />
-
-          {/* Guidance text */}
-          <View style={styles.guidanceRow}>
-            <Ionicons
-              name="information-circle-outline"
-              size={14}
-              color="rgba(255,255,255,0.7)"
-            />
-            <ThemeText category="caption" style={styles.guidanceText}>
-              Align soil within the target frame, 20–30 cm away
-            </ThemeText>
+          {/* Guidance pill */}
+          <View style={styles.guidancePill}>
+            <Ionicons name="leaf-outline" size={13} color={Colors.lightGreen} />
+            <Text style={styles.guidanceText}>
+              Center soil sample · 20–30 cm away
+            </Text>
           </View>
 
-          {/* Controls row */}
+          {/* ── CONTROLS ─────────────────────────────────────────────── */}
           <View style={styles.controlsRow}>
-            {/* Gallery picker */}
+            {/* Gallery */}
             <TouchableOpacity
               style={styles.sideBtn}
               onPress={pickFromGallery}
-              activeOpacity={0.8}
+              activeOpacity={0.75}
             >
-              <Ionicons name="images" size={24} color={Colors.white} />
-              <ThemeText category="caption" style={styles.sideBtnLabel}>
-                Gallery
-              </ThemeText>
+              <View style={styles.sideBtnIcon}>
+                <Ionicons name="images" size={22} color={Colors.white} />
+              </View>
+              <Text style={styles.sideBtnLabel}>Gallery</Text>
             </TouchableOpacity>
 
-            {/* Main capture button */}
+            {/* Capture */}
             <Animated.View
-              style={[
-                styles.captureBtnOuter,
-                { transform: [{ scale: captureRing }] },
-              ]}
+              style={[styles.captureBtnOuter, { transform: [{ scale: captureRing }] }]}
             >
               <TouchableOpacity
-                style={styles.captureBtnInner}
+                style={[styles.captureBtnInner, !cameraReady && styles.captureBtnDisabled]}
                 onPress={takePicture}
                 activeOpacity={0.85}
+                disabled={!cameraReady}
               >
-                <Ionicons name="camera" size={34} color={Colors.darkGreen} />
+                {cameraReady ? (
+                  <Ionicons name="camera" size={32} color={Colors.darkGreen} />
+                ) : (
+                  <AILoadingAnimation size={28} />
+                )}
               </TouchableOpacity>
             </Animated.View>
 
-            {/* Flash toggle */}
+            {/* Flash */}
             <TouchableOpacity
-              style={[
-                styles.sideBtn,
-                flash === "on" && styles.sideBtnActive,
-              ]}
+              style={[styles.sideBtn, flash === "on" && styles.sideBtnFlashActive]}
               onPress={cycleFlash}
-              activeOpacity={0.8}
+              activeOpacity={0.75}
             >
-              <Ionicons
-                name={FLASH_ICONS[flash]}
-                size={24}
-                color={
-                  flash === "on" ? Colors.accentYellow : Colors.white
-                }
-              />
-              <ThemeText
-                category="caption"
+              <View
+                style={[
+                  styles.sideBtnIcon,
+                  flash === "on" && { backgroundColor: "rgba(255,179,0,0.22)" },
+                ]}
+              >
+                <Ionicons
+                  name={FLASH_ICONS[flash]}
+                  size={22}
+                  color={flash === "on" ? Colors.accentYellow : Colors.white}
+                />
+              </View>
+              <Text
                 style={[
                   styles.sideBtnLabel,
                   flash === "on" && { color: Colors.accentYellow },
                 ]}
               >
                 {FLASH_LABELS[flash]}
-              </ThemeText>
+              </Text>
             </TouchableOpacity>
           </View>
 
           {/* Flip camera */}
-          <TouchableOpacity style={styles.flipBtn} onPress={flipCamera}>
-            <Ionicons
-              name="camera-reverse-outline"
-              size={20}
-              color={Colors.white}
-            />
-            <ThemeText category="caption" style={styles.flipBtnText}>
-              Flip
-            </ThemeText>
+          <TouchableOpacity style={styles.flipBtn} onPress={flipCamera} activeOpacity={0.75}>
+            <View style={styles.flipBtnInner}>
+              <Ionicons name="camera-reverse-outline" size={19} color={Colors.white} />
+            </View>
           </TouchableOpacity>
         </View>
       ) : (
-        // ── AI ANALYZING STATE ──────────────────────────────────────────
+        // ── AI ANALYZING STATE ─────────────────────────────────────────
         <View style={[styles.analyzingContainer, { backgroundColor: themeColors.bg }]}>
-          {/* Captured image preview (small thumbnail) */}
+          {/* Soil image thumbnail */}
           {capturedImageUri && (
-            <View style={styles.thumbnailWrapper}>
+            <View style={styles.thumbnailCard}>
               <Image
                 source={{ uri: capturedImageUri }}
                 style={styles.thumbnail}
                 resizeMode="cover"
               />
               <View style={styles.thumbnailOverlay}>
-                <Ionicons
-                  name="sparkles"
-                  size={16}
-                  color={Colors.accentYellow}
-                />
-                <ThemeText
-                  category="caption"
-                  style={{ color: Colors.white, marginLeft: 4, fontWeight: "700" }}
-                >
-                  AI Scanning
-                </ThemeText>
+                <View style={styles.thumbnailBadge}>
+                  <Ionicons name="sparkles" size={11} color={Colors.accentYellow} />
+                  <Text style={styles.thumbnailBadgeText}>AI SCANNING</Text>
+                </View>
               </View>
             </View>
           )}
 
-          <AILoadingAnimation size={80} style={{ marginVertical: 28 }} />
+          <AILoadingAnimation size={72} style={{ marginTop: 28, marginBottom: 20 }} />
 
-          <ThemeText
-            category="h2"
-            style={{ color: Colors.darkGreen, fontWeight: "800", textAlign: "center" }}
-          >
-            AI Processing Soil
-          </ThemeText>
+          <Text style={styles.analyzingTitle}>Analyzing Soil Sample</Text>
+          <Text style={styles.analyzingSubtitle}>
+            EfficientNet-b0 · 7 soil classes
+          </Text>
 
           {/* Progress bar */}
           <View style={styles.progressContainer}>
-            <View
-              style={[
-                styles.progressBg,
-                { backgroundColor: themeColors.border },
-              ]}
-            >
+            <View style={[styles.progressTrack, { backgroundColor: themeColors.border }]}>
+              <Animated.View
+                style={[styles.progressFill, { width: progressWidth as any }]}
+              />
+              {/* Shimmer dot */}
               <Animated.View
                 style={[
-                  styles.progressFill,
-                  { width: `${scanProgress}%` as any },
+                  styles.progressDot,
+                  { left: progressWidth as any },
                 ]}
               />
             </View>
-            <View style={styles.progressLabelRow}>
-              <ThemeText category="label" style={styles.progressPct}>
-                {scanProgress}% Completed
-              </ThemeText>
-              {scanProgress < 100 && (
-                <ThemeText
-                  category="caption"
-                  style={{ color: themeColors.subText }}
-                >
-                  Please wait…
-                </ThemeText>
-              )}
+            <View style={styles.progressMeta}>
+              <Animated.Text
+                style={[styles.progressPct, { color: Colors.darkGreen }]}
+              >
+                {Math.round(scanProgress > 0 ? scanProgress : 0)}%
+              </Animated.Text>
+              <Text style={[styles.progressStatus, { color: themeColors.subText }]}>
+                Processing…
+              </Text>
             </View>
           </View>
 
-          <ThemeText
-            category="bodyBold"
-            style={[styles.stepText, { color: themeColors.text }]}
+          {/* Step text with fade animation */}
+          <Animated.View
+            style={[styles.stepContainer, { opacity: stepFadeAnim }]}
           >
-            {scanStepText}
-          </ThemeText>
+            <View style={styles.stepBadge}>
+              <View style={styles.stepPulse} />
+              <Text style={styles.stepText}>
+                {SCAN_STEPS[scanStepIndex]?.text ?? "Analyzing…"}
+              </Text>
+            </View>
+          </Animated.View>
 
-          <ThemeText category="caption" style={styles.disclaimer}>
-            Computing NPK concentrations via remote neural diagnostics.
-          </ThemeText>
+          {/* Soil class chips (visual decoration) */}
+          <View style={styles.classChipsRow}>
+            {["Alluvial", "Red", "Black", "Laterite", "Arid"].map((c) => (
+              <View key={c} style={styles.classChip}>
+                <Text style={styles.classChipText}>{c}</Text>
+              </View>
+            ))}
+          </View>
+
+          <Text style={[styles.disclaimer, { color: themeColors.subText }]}>
+            Neural diagnostics via EfficientNet-b0 · Results are indicative
+          </Text>
         </View>
       )}
     </View>
@@ -512,15 +596,12 @@ export default function ScanScreen() {
 }
 
 // ─── Styles ────────────────────────────────────────────────────────────────────
-const FRAME_SIZE = Math.min(width * 0.7, 280);
+const FRAME_SIZE = Math.min(width * 0.68, 270);
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#000",
-  },
+  container: { flex: 1, backgroundColor: "#000" },
 
-  // ── Permission screen ────────────────────────────────────────────────────
+  // Permission
   permissionContainer: {
     flex: 1,
     alignItems: "center",
@@ -528,21 +609,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: 36,
   },
   permissionIconRing: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    backgroundColor: Colors.lightGreen + "18",
-    borderWidth: 2,
-    borderColor: Colors.lightGreen + "40",
+    width: 96,
+    height: 96,
+    borderRadius: 48,
+    backgroundColor: Colors.lightGreen + "15",
+    borderWidth: 1.5,
+    borderColor: Colors.lightGreen + "35",
     alignItems: "center",
     justifyContent: "center",
     marginBottom: 24,
   },
-  permissionTitle: {
-    fontWeight: "800",
-    textAlign: "center",
-    marginBottom: 12,
-  },
+  permissionTitle: { fontWeight: "800", textAlign: "center", marginBottom: 10 },
   permissionBody: {
     textAlign: "center",
     lineHeight: 20,
@@ -557,14 +634,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 32,
     borderRadius: 14,
     gap: 8,
-    marginBottom: 14,
+    marginBottom: 12,
     width: "100%",
     justifyContent: "center",
   },
-  permissionBtnText: {
-    color: Colors.white,
-    marginLeft: 6,
-  },
+  permissionBtnText: { color: Colors.white, marginLeft: 6 },
   permissionGalleryBtn: {
     flexDirection: "row",
     alignItems: "center",
@@ -577,12 +651,9 @@ const styles = StyleSheet.create({
     width: "100%",
     justifyContent: "center",
   },
-  permissionGalleryText: {
-    color: Colors.darkGreen,
-    marginLeft: 6,
-  },
+  permissionGalleryText: { color: Colors.darkGreen, marginLeft: 6 },
 
-  // ── Header ───────────────────────────────────────────────────────────────
+  // Header
   header: {
     position: "absolute",
     top: 0,
@@ -592,77 +663,73 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    paddingHorizontal: 20,
+    paddingHorizontal: 16,
     paddingTop: Platform.OS === "ios" ? 56 : (StatusBar.currentHeight ?? 24) + 12,
-    paddingBottom: 12,
-    backgroundColor: "rgba(0,0,0,0.45)",
+    paddingBottom: 14,
+    backgroundColor: "rgba(0,0,0,0.5)",
   },
   headerBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: "rgba(255,255,255,0.12)",
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: "rgba(255,255,255,0.13)",
     alignItems: "center",
     justifyContent: "center",
   },
-  headerTitle: {
-    color: Colors.white,
-    fontWeight: "800",
+  headerCenter: { flexDirection: "row", alignItems: "center", gap: 7 },
+  headerDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    backgroundColor: Colors.lightGreen,
   },
+  headerTitle: { color: Colors.white, fontWeight: "800" },
 
-  // ── Camera view ───────────────────────────────────────────────────────────
-  cameraWrapper: {
-    flex: 1,
-    backgroundColor: "#000",
-  },
-  camera: {
-    flex: 1,
-  },
+  // Camera
+  cameraWrapper: { flex: 1, backgroundColor: "#000" },
+  camera: { flex: 1 },
   topOverlay: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    height: 130,
-    backgroundColor: "rgba(0,0,0,0.35)",
+    position: "absolute", top: 0, left: 0, right: 0, height: 140,
+    backgroundColor: "rgba(0,0,0,0.4)",
   },
   bottomOverlay: {
-    position: "absolute",
-    bottom: 0,
-    left: 0,
-    right: 0,
-    height: 200,
-    backgroundColor: "rgba(0,0,0,0.5)",
+    position: "absolute", bottom: 0, left: 0, right: 0, height: 210,
+    backgroundColor: "rgba(0,0,0,0.55)",
+  },
+  leftOverlay: {
+    position: "absolute", top: 140, bottom: 210, left: 0,
+    width: (width - FRAME_SIZE) / 2,
+    backgroundColor: "rgba(0,0,0,0.3)",
+  },
+  rightOverlay: {
+    position: "absolute", top: 140, bottom: 210, right: 0,
+    width: (width - FRAME_SIZE) / 2,
+    backgroundColor: "rgba(0,0,0,0.3)",
   },
 
-  // Flash hint toast
   flashHint: {
     position: "absolute",
-    top: 140,
+    top: 148,
     alignSelf: "center",
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "rgba(0,0,0,0.65)",
-    paddingHorizontal: 12,
-    paddingVertical: 6,
+    backgroundColor: "rgba(0,0,0,0.7)",
+    paddingHorizontal: 14,
+    paddingVertical: 7,
     borderRadius: 20,
-    gap: 4,
+    gap: 5,
     zIndex: 10,
   },
-  flashHintText: {
-    color: Colors.white,
-    marginLeft: 4,
-    fontWeight: "600",
-  },
+  flashHintText: { color: "#fff", fontSize: 12, fontWeight: "600" },
 
-  // Scan target frame
+  // Target frame
   targetFrame: {
     position: "absolute",
     top: "50%",
     left: "50%",
     width: FRAME_SIZE,
     height: FRAME_SIZE,
-    marginTop: -(FRAME_SIZE / 2),
+    marginTop: -(FRAME_SIZE / 2 + 20),
     marginLeft: -(FRAME_SIZE / 2),
     alignItems: "center",
     justifyContent: "center",
@@ -670,200 +737,280 @@ const styles = StyleSheet.create({
   },
   corner: {
     position: "absolute",
-    width: 30,
-    height: 30,
-    borderWidth: 3,
+    width: 28,
+    height: 28,
+    borderWidth: 2.5,
+    borderColor: Colors.lightGreen,
   },
-  cornerTL: { top: 0, left: 0, borderRightWidth: 0, borderBottomWidth: 0 },
-  cornerTR: { top: 0, right: 0, borderLeftWidth: 0, borderBottomWidth: 0 },
-  cornerBL: { bottom: 0, left: 0, borderRightWidth: 0, borderTopWidth: 0 },
-  cornerBR: { bottom: 0, right: 0, borderLeftWidth: 0, borderTopWidth: 0 },
+  cornerTL: { top: 0, left: 0, borderRightWidth: 0, borderBottomWidth: 0, borderTopLeftRadius: 4 },
+  cornerTR: { top: 0, right: 0, borderLeftWidth: 0, borderBottomWidth: 0, borderTopRightRadius: 4 },
+  cornerBL: { bottom: 0, left: 0, borderRightWidth: 0, borderTopWidth: 0, borderBottomLeftRadius: 4 },
+  cornerBR: { bottom: 0, right: 0, borderLeftWidth: 0, borderTopWidth: 0, borderBottomRightRadius: 4 },
   crosshairH: {
     position: "absolute",
-    width: 60,
+    width: 50,
     height: 1,
-    backgroundColor: "rgba(255,255,255,0.35)",
+    backgroundColor: "rgba(255,255,255,0.3)",
   },
   crosshairV: {
     position: "absolute",
     width: 1,
-    height: 60,
-    backgroundColor: "rgba(255,255,255,0.35)",
+    height: 50,
+    backgroundColor: "rgba(255,255,255,0.3)",
   },
   centerRing: {
     position: "absolute",
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
     borderWidth: 1.5,
+    borderColor: Colors.lightGreen + "90",
     borderStyle: "dashed",
   },
   scanLine: {
     position: "absolute",
     top: 0,
     width: "100%",
-    height: 3,
+    height: 2.5,
     backgroundColor: Colors.lightGreen,
     shadowColor: Colors.lightGreen,
     shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 1,
-    shadowRadius: 8,
-    elevation: 6,
+    shadowOpacity: 0.9,
+    shadowRadius: 10,
+    elevation: 8,
   },
 
-  // Guidance text
-  guidanceRow: {
+  guidancePill: {
     position: "absolute",
-    bottom: 200,
+    bottom: 210,
     alignSelf: "center",
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "rgba(0,0,0,0.55)",
-    paddingHorizontal: 14,
-    paddingVertical: 6,
+    backgroundColor: "rgba(0,0,0,0.62)",
+    paddingHorizontal: 16,
+    paddingVertical: 7,
     borderRadius: 20,
-    gap: 4,
+    gap: 6,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.08)",
   },
   guidanceText: {
-    color: "rgba(255,255,255,0.85)",
-    marginLeft: 4,
+    color: "rgba(255,255,255,0.88)",
+    fontSize: 12,
     fontWeight: "500",
+    marginLeft: 2,
   },
 
-  // Controls row
+  // Controls
   controlsRow: {
     position: "absolute",
-    bottom: 60,
+    bottom: 55,
     left: 0,
     right: 0,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-evenly",
-    paddingHorizontal: 24,
+    paddingHorizontal: 20,
   },
-  sideBtn: {
+  sideBtn: { alignItems: "center", gap: 5 },
+  sideBtnFlashActive: {},
+  sideBtnIcon: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: "rgba(255,255,255,0.13)",
     alignItems: "center",
     justifyContent: "center",
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: "rgba(255,255,255,0.12)",
-    gap: 2,
-  },
-  sideBtnActive: {
-    backgroundColor: "rgba(255,179,0,0.18)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.1)",
   },
   sideBtnLabel: {
-    color: Colors.white,
-    fontSize: 9,
+    color: "rgba(255,255,255,0.8)",
+    fontSize: 10,
     fontWeight: "600",
-    marginTop: 2,
   },
   captureBtnOuter: {
-    width: 82,
-    height: 82,
-    borderRadius: 41,
-    backgroundColor: "rgba(255,255,255,0.25)",
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: "rgba(255,255,255,0.2)",
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 2.5,
-    borderColor: "rgba(255,255,255,0.6)",
+    borderColor: "rgba(255,255,255,0.55)",
   },
   captureBtnInner: {
-    width: 66,
-    height: 66,
-    borderRadius: 33,
+    width: 64,
+    height: 64,
+    borderRadius: 32,
     backgroundColor: Colors.white,
     alignItems: "center",
     justifyContent: "center",
     shadowColor: Colors.lightGreen,
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.4,
-    shadowRadius: 10,
-    elevation: 8,
+    shadowOpacity: 0.5,
+    shadowRadius: 12,
+    elevation: 10,
   },
+  captureBtnDisabled: { opacity: 0.5 },
 
-  // Flip button
-  flipBtn: {
-    position: "absolute",
-    bottom: 80,
-    right: 20,
+  flipBtn: { position: "absolute", bottom: 72, right: 22 },
+  flipBtnInner: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "rgba(255,255,255,0.13)",
     alignItems: "center",
-    opacity: 0.8,
-  },
-  flipBtnText: {
-    color: Colors.white,
-    fontSize: 9,
-    marginTop: 2,
-    fontWeight: "600",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
   },
 
-  // ── AI analyzing ─────────────────────────────────────────────────────────
+  // Analyzing state
   analyzingContainer: {
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    paddingHorizontal: 36,
-    paddingTop: 100,
+    paddingHorizontal: 32,
+    paddingTop: 90,
   },
-  thumbnailWrapper: {
-    width: 100,
-    height: 100,
-    borderRadius: 20,
+  thumbnailCard: {
+    width: 110,
+    height: 110,
+    borderRadius: 22,
     overflow: "hidden",
     borderWidth: 2,
-    borderColor: Colors.lightGreen,
-    marginBottom: 4,
+    borderColor: Colors.lightGreen + "80",
+    shadowColor: Colors.darkGreen,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.25,
+    shadowRadius: 12,
+    elevation: 8,
   },
-  thumbnail: {
-    width: "100%",
-    height: "100%",
-  },
+  thumbnail: { width: "100%", height: "100%" },
   thumbnailOverlay: {
     position: "absolute",
     bottom: 0,
     width: "100%",
-    backgroundColor: "rgba(27,94,32,0.82)",
-    flexDirection: "row",
+    backgroundColor: "rgba(20,75,25,0.88)",
     alignItems: "center",
     justifyContent: "center",
-    paddingVertical: 4,
+    paddingVertical: 5,
   },
-  progressContainer: {
-    width: "100%",
-    marginVertical: 20,
+  thumbnailBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
   },
-  progressBg: {
+  thumbnailBadgeText: {
+    color: Colors.accentYellow,
+    fontSize: 9,
+    fontWeight: "800",
+    letterSpacing: 0.8,
+  },
+
+  analyzingTitle: {
+    fontSize: 22,
+    fontWeight: "800",
+    color: Colors.darkGreen,
+    textAlign: "center",
+    letterSpacing: -0.3,
+  },
+  analyzingSubtitle: {
+    fontSize: 12,
+    color: Colors.textSecondary,
+    marginTop: 4,
+    marginBottom: 4,
+    fontWeight: "500",
+    letterSpacing: 0.3,
+  },
+
+  progressContainer: { width: "100%", marginVertical: 18 },
+  progressTrack: {
     width: "100%",
-    height: 10,
-    borderRadius: 5,
+    height: 8,
+    borderRadius: 4,
     overflow: "hidden",
+    position: "relative",
   },
   progressFill: {
     height: "100%",
     backgroundColor: Colors.darkGreen,
-    borderRadius: 5,
+    borderRadius: 4,
   },
-  progressLabelRow: {
+  progressDot: {
+    position: "absolute",
+    top: "50%",
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: Colors.lightGreen,
+    marginTop: -6,
+    marginLeft: -6,
+    shadowColor: Colors.lightGreen,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 1,
+    shadowRadius: 6,
+    elevation: 4,
+  },
+  progressMeta: {
     flexDirection: "row",
     justifyContent: "space-between",
-    marginTop: 6,
+    marginTop: 8,
   },
-  progressPct: {
-    fontWeight: "700",
-    color: Colors.darkGreen,
+  progressPct: { fontSize: 13, fontWeight: "800" },
+  progressStatus: { fontSize: 12, fontWeight: "500" },
+
+  stepContainer: { alignItems: "center", marginVertical: 4 },
+  stepBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: Colors.darkGreen + "12",
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: Colors.darkGreen + "25",
+    gap: 8,
+  },
+  stepPulse: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    backgroundColor: Colors.lightGreen,
   },
   stepText: {
-    textAlign: "center",
-    fontSize: 15,
-    minHeight: 48,
-    maxWidth: 280,
+    fontSize: 13,
+    fontWeight: "600",
+    color: Colors.darkGreen,
   },
+
+  classChipsRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "center",
+    gap: 6,
+    marginTop: 20,
+    marginBottom: 4,
+  },
+  classChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    backgroundColor: Colors.darkGreen + "0E",
+    borderWidth: 1,
+    borderColor: Colors.darkGreen + "20",
+  },
+  classChipText: {
+    fontSize: 11,
+    color: Colors.darkGreen,
+    fontWeight: "600",
+  },
+
   disclaimer: {
-    color: Colors.textSecondary,
     textAlign: "center",
     fontSize: 11,
-    marginTop: 20,
+    marginTop: 16,
     lineHeight: 16,
   },
 });

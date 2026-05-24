@@ -49,12 +49,95 @@ async def run_inference(file: UploadFile = File(...)):
     input_tensor = transform(image).unsqueeze(0).to(device)
 
     # Run the actual inference
+    # Run the actual inference
     with torch.inference_mode():
         outputs = model(input_tensor)
         probabilities = torch.softmax(outputs, dim=1)
         confidence, predicted_idx = torch.max(probabilities, 1)
 
-    return {
-        "prediction": class_names[predicted_idx.item()],
-        "confidence_score": float(confidence.item()),
-    }
+    # 1. Use .item() to extract the float/int from the tensor
+    # 2. Multiply by 100 to get the percentage
+    # 3. Use flush=True to bypass the Uvicorn buffer and print to the terminal instantly
+    print(
+        f"Predicted Index: {predicted_idx.item()} ({class_names[predicted_idx.item()]})",
+        flush=True,
+    )
+    print(f"Confidence: {confidence.item() * 100:.2f}%", flush=True)
+    properties = SoilPropertyEstimator()
+
+    # In main.py — replace the confidence check block:
+
+    if confidence.item() > 0.40:  # lowered from 0.40
+        props = properties.predict_properties(class_names[predicted_idx.item()])
+        return {
+            "prediction": class_names[predicted_idx.item()],
+            "confidence_score": round(confidence.item() * 100, 2),
+            "props": props,
+            "success": True,
+            "low_confidence": confidence.item() < 0.50,  # warn but don't block
+        }
+    else:
+        return {
+            "prediction": "Unknown",
+            "error": "Image quality too low to identify soil type. Try better lighting.",
+            "success": False,
+        }
+
+
+class SoilPropertyEstimator:
+    def __init__(self):
+        # Baseline inherent properties for Indian/Subcontinental soil types
+        self.soil_profiles = {
+            "Alluvial_Soil": {
+                "pH_range": "6.5 - 8.4 (Slightly Acidic to Alkaline)",
+                "Nitrogen_N": "Low to Medium",
+                "Phosphorus_P": "Low",
+                "Potassium_K": "High",
+            },
+            "Arid_Soil": {
+                "pH_range": "7.0 - 9.0 (Alkaline)",
+                "Nitrogen_N": "Very Low",
+                "Phosphorus_P": "Normal to High",
+                "Potassium_K": "Adequate",
+            },
+            "Black_Soil": {
+                "pH_range": "7.2 - 8.5 (Neutral to Alkaline)",
+                "Nitrogen_N": "Low",
+                "Phosphorus_P": "Low",
+                "Potassium_K": "High (Also rich in Calcium and Magnesium)",
+            },
+            "Laterite_Soil": {
+                "pH_range": "4.5 - 6.5 (Acidic)",
+                "Nitrogen_N": "Low",
+                "Phosphorus_P": "Low",
+                "Potassium_K": "Low (Highly leached)",
+            },
+            "Mountain_Soil": {
+                "pH_range": "5.5 - 6.5 (Acidic)",
+                "Nitrogen_N": "High (Rich in organic humus)",
+                "Phosphorus_P": "Low",
+                "Potassium_K": "Low",
+            },
+            "Red_Soil": {
+                "pH_range": "5.5 - 7.5 (Acidic to Neutral)",
+                "Nitrogen_N": "Low",
+                "Phosphorus_P": "Low",
+                "Potassium_K": "Medium",
+            },
+            "Yellow_Soil": {
+                "pH_range": "5.5 - 6.5 (Acidic)",
+                "Nitrogen_N": "Low",
+                "Phosphorus_P": "Low",
+                "Potassium_K": "Medium",
+            },
+        }
+
+    def predict_properties(self, soil_class_name):
+        """
+        Takes the predicted class string from the PyTorch model and
+        returns a dictionary of estimated pH and NPK values.
+        """
+        if soil_class_name in self.soil_profiles:
+            return self.soil_profiles[soil_class_name]
+        else:
+            return {"Error": f"Soil type '{soil_class_name}' not found in database."}

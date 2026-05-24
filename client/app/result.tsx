@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect, useRef } from "react";
 import {
   StyleSheet,
   View,
@@ -7,8 +7,13 @@ import {
   Alert,
   Share,
   Text,
+  Image,
+  Animated,
+  Platform,
+  StatusBar,
+  Dimensions,
 } from "react-native";
-import { useRouter } from "expo-router";
+import { useRouter, useLocalSearchParams } from "expo-router";
 import {
   EarthyCard,
   ThemeText,
@@ -20,717 +25,887 @@ import {
 } from "../components/DesignSystem";
 import { Ionicons } from "@expo/vector-icons";
 
-// const { width } = Dimensions.get("window");
+const { width } = Dimensions.get("window");
+
+// ─── Soil knowledge base ────────────────────────────────────────────────────
+// Maps each prediction to its properties, health score, and crop suggestions.
+// pH/NPK come from the backend `props` object; everything else is static knowledge.
+
+type SoilProfile = {
+  classification: string;
+  healthScore: number;
+  phValue: number;
+  phLabel: string;
+  phStatus: string;
+  moisture: number;
+  moistureLabel: string;
+  aiSummary: string;
+  crops: string[];
+  treatments: string[];
+  npkWarning: string | null;
+  riskFactors: { name: string; risk: string; icon: string; color: string }[];
+};
+
+const SOIL_PROFILES: Record<string, SoilProfile> = {
+  "Alluvial Soil": {
+    classification: "Class I · Very High Yield Potential",
+    healthScore: 88,
+    phValue: 7.2,
+    phLabel: "Neutral",
+    phStatus: "IDEAL FOR MOST CROPS",
+    moisture: 52,
+    moistureLabel: "OPTIMAL MOISTURE",
+    aiSummary:
+      "Alluvial soil is among the most fertile in the subcontinent, formed by river sediment deposits. It has excellent water retention and a well-balanced nutrient profile. Potassium levels are naturally high, but regular nitrogen supplementation is recommended for high-yield cultivation.",
+    crops: ["Rice", "Wheat", "Sugarcane", "Maize", "Pulses"],
+    treatments: [
+      "Apply urea or ammonium sulphate to replenish nitrogen before sowing.",
+      "Use single superphosphate to address phosphorus deficiency.",
+      "Practice seasonal crop rotation to prevent nutrient depletion.",
+    ],
+    npkWarning: "Nitrogen (N) and Phosphorus (P) are typically low — supplement before sowing.",
+    riskFactors: [
+      { name: "Waterlogging Risk", risk: "Medium", icon: "water-outline", color: Colors.accentYellow },
+      { name: "Fungal Pathogens", risk: "Low", icon: "bug-outline", color: Colors.lightGreen },
+      { name: "Salinity", risk: "None Detected", icon: "shield-checkmark-outline", color: Colors.lightGreen },
+    ],
+  },
+  "Arid Soil": {
+    classification: "Class IV · Low Yield Potential",
+    healthScore: 34,
+    phValue: 8.2,
+    phLabel: "Alkaline",
+    phStatus: "NEEDS ACIDIFICATION",
+    moisture: 12,
+    moistureLabel: "CRITICALLY DRY",
+    aiSummary:
+      "Arid soil is highly alkaline and extremely low in organic matter and nitrogen. Its sandy texture leads to rapid water loss and poor nutrient retention. Cultivation is possible only with heavy amendment — drip irrigation, organic matter addition, and phosphate supplements are essential before sowing.",
+    crops: ["Bajra", "Drought-tolerant Sorghum", "Moth Bean", "Cluster Bean"],
+    treatments: [
+      "Add gypsum or sulphur to reduce alkalinity before planting.",
+      "Incorporate large quantities of composted manure to build organic matter.",
+      "Install drip irrigation; this soil cannot sustain flood or sprinkler methods.",
+    ],
+    npkWarning: "Nitrogen (N) is very low. Phosphorus is normal but potassium may be adequate — verify with a lab test.",
+    riskFactors: [
+      { name: "Wind Erosion", risk: "High", icon: "alert-circle-outline", color: "#EF5350" },
+      { name: "Saline Accumulation", risk: "Medium", icon: "alert-circle-outline", color: Colors.accentYellow },
+      { name: "Root Rot", risk: "None Detected", icon: "shield-checkmark-outline", color: Colors.lightGreen },
+    ],
+  },
+  "Black Soil": {
+    classification: "Class II · High Yield Potential",
+    healthScore: 72,
+    phValue: 7.8,
+    phLabel: "Mildly Alkaline",
+    phStatus: "GOOD FOR COTTON & SOYBEAN",
+    moisture: 48,
+    moistureLabel: "GOOD MOISTURE",
+    aiSummary:
+      "Black cotton soil (Regur) is known for its high clay content and excellent moisture retention. Rich in calcium, magnesium, and potassium, it is ideal for dry-land farming. However, it swells when wet and cracks when dry, making it challenging to work with. Nitrogen and phosphorus are consistently low and must be supplemented.",
+    crops: ["Cotton", "Soybean", "Jowar", "Sunflower", "Wheat"],
+    treatments: [
+      "Apply DAP (Di-Ammonium Phosphate) to address nitrogen and phosphorus deficiency.",
+      "Avoid over-irrigation — the high clay content causes waterlogging.",
+      "Use subsoil tillage (deep ploughing) before the kharif season to break hardpan.",
+    ],
+    npkWarning: "Nitrogen (N) and Phosphorus (P) are low despite good potassium — targeted NPK amendment recommended.",
+    riskFactors: [
+      { name: "Cracking & Shrinkage", risk: "High", icon: "alert-circle-outline", color: "#EF5350" },
+      { name: "Waterlogging", risk: "Medium", icon: "water-outline", color: Colors.accentYellow },
+      { name: "Fungal Pathogens", risk: "Low", icon: "bug-outline", color: Colors.lightGreen },
+    ],
+  },
+  "Laterite Soil": {
+    classification: "Class III · Moderate Yield Potential",
+    healthScore: 48,
+    phValue: 5.4,
+    phLabel: "Acidic",
+    phStatus: "NEEDS LIMING",
+    moisture: 28,
+    moistureLabel: "BELOW OPTIMAL",
+    aiSummary:
+      "Laterite soil is highly leached and acidic, formed in tropical regions with heavy rainfall. It is poor in all major nutrients due to intense weathering. While it supports tea, coffee, and cashew in its natural state, most food crops require significant soil amendment — liming to raise pH and heavy fertilization for any productive yield.",
+    crops: ["Tea", "Coffee", "Cashew", "Rubber", "Tapioca"],
+    treatments: [
+      "Apply agricultural lime (calcium carbonate) to raise pH above 6.0.",
+      "Use NPK complex fertilizers — all three nutrients are deficient.",
+      "Incorporate green manure or compost to improve organic carbon and water retention.",
+    ],
+    npkWarning: "All major nutrients (N, P, K) are critically low due to heavy leaching. Complete NPK fertilization is essential.",
+    riskFactors: [
+      { name: "Nutrient Leaching", risk: "High", icon: "alert-circle-outline", color: "#EF5350" },
+      { name: "Iron Toxicity", risk: "Medium", icon: "alert-circle-outline", color: Colors.accentYellow },
+      { name: "Root Rot", risk: "Low", icon: "bug-outline", color: Colors.lightGreen },
+    ],
+  },
+  "Mountain Soil": {
+    classification: "Class II · Moderate–High Potential",
+    healthScore: 76,
+    phValue: 5.9,
+    phLabel: "Slightly Acidic",
+    phStatus: "SUITABLE FOR HORTICULTURE",
+    moisture: 61,
+    moistureLabel: "HIGH MOISTURE",
+    aiSummary:
+      "Mountain (forest) soil is rich in organic humus from leaf litter and has excellent microbial activity. Nitrogen levels are naturally high, but phosphorus and potassium are consistently low. The acidic pH makes it ideal for tea, fruits, and spices. Drainage management is important due to high moisture retention on slopes.",
+    crops: ["Apple", "Tea", "Cardamom", "Ginger", "Potato"],
+    treatments: [
+      "Apply rock phosphate or bone meal to address phosphorus deficiency.",
+      "Use muriate of potash (MOP) to supplement low potassium levels.",
+      "Maintain terracing on slopes to prevent erosion and retain moisture.",
+    ],
+    npkWarning: "Phosphorus (P) and Potassium (K) are low despite high nitrogen. Targeted P and K supplementation needed.",
+    riskFactors: [
+      { name: "Slope Erosion", risk: "High", icon: "alert-circle-outline", color: "#EF5350" },
+      { name: "Fungal Spores", risk: "Medium", icon: "bug-outline", color: Colors.accentYellow },
+      { name: "Nematodes", risk: "None Detected", icon: "shield-checkmark-outline", color: Colors.lightGreen },
+    ],
+  },
+  "Red Soil": {
+    classification: "Class III · Moderate Yield Potential",
+    healthScore: 55,
+    phValue: 6.4,
+    phLabel: "Slightly Acidic",
+    phStatus: "NEAR IDEAL RANGE",
+    moisture: 22,
+    moistureLabel: "SLIGHTLY DRY",
+    aiSummary:
+      "Red soil gets its colour from iron oxide content and is well-drained but porous, leading to low moisture retention. It is deficient in nitrogen, phosphorus, and organic matter, but has a reasonable potassium content. With proper amendment and irrigation, it can support a wide variety of crops including groundnuts and pulses.",
+    crops: ["Groundnut", "Millets", "Tobacco", "Pulses", "Potato"],
+    treatments: [
+      "Apply farmyard manure (FYM) to improve organic carbon and water retention.",
+      "Use phosphatic fertilizers (SSP or DAP) to address P deficiency.",
+      "Mulch between rows to reduce moisture evaporation during dry months.",
+    ],
+    npkWarning: "Nitrogen (N) and Phosphorus (P) are low. Medium potassium — supplement N and P before sowing.",
+    riskFactors: [
+      { name: "Drought Stress", risk: "Medium", icon: "alert-circle-outline", color: Colors.accentYellow },
+      { name: "Fungal Pathogens", risk: "Low", icon: "bug-outline", color: Colors.lightGreen },
+      { name: "Nematodes", risk: "None Detected", icon: "shield-checkmark-outline", color: Colors.lightGreen },
+    ],
+  },
+  "Yellow Soil": {
+    classification: "Class III · Moderate Yield Potential",
+    healthScore: 51,
+    phValue: 6.0,
+    phLabel: "Slightly Acidic",
+    phStatus: "ACCEPTABLE RANGE",
+    moisture: 26,
+    moistureLabel: "LOW MOISTURE",
+    aiSummary:
+      "Yellow soil is similar to red soil but higher in iron content that has been further oxidized to a yellow hue. It has low organic matter and poor fertility across all NPK categories. Fine texture helps retain slightly more moisture than red soil, but it still requires extensive organic and inorganic amendment for productive cultivation.",
+    crops: ["Rice", "Millets", "Groundnut", "Pulses"],
+    treatments: [
+      "Apply composted organic matter to improve soil structure and fertility.",
+      "Use balanced NPK fertilizer (e.g. 10:26:26) before sowing.",
+      "Consider lime application if pH drops below 5.5.",
+    ],
+    npkWarning: "Nitrogen (N), Phosphorus (P), and Potassium (K) are all low. Full NPK amendment is essential.",
+    riskFactors: [
+      { name: "Nutrient Deficiency", risk: "High", icon: "alert-circle-outline", color: "#EF5350" },
+      { name: "Compaction Risk", risk: "Medium", icon: "alert-circle-outline", color: Colors.accentYellow },
+      { name: "Fungal Pathogens", risk: "Low", icon: "bug-outline", color: Colors.lightGreen },
+    ],
+  },
+};
+
+// ─── NPK text → number helpers ────────────────────────────────────────────────
+function npkTextToValue(text: string): number {
+  const t = text.toLowerCase();
+  if (t.includes("very low")) return 18;
+  if (t.includes("low")) return 35;
+  if (t.includes("medium") || t.includes("moderate")) return 58;
+  if (t.includes("high")) return 80;
+  if (t.includes("adequate") || t.includes("normal")) return 65;
+  return 45;
+}
 
 export default function ResultScreen() {
   const router = useRouter();
   const themeColors = useThemeColors();
+  const params = useLocalSearchParams<{
+    prediction: string;
+    confidence: string;
+    imageUri: string;
+    lowConfidence: string;
+    props: string; // JSON string from backend
+  }>();
 
-  // Simulated data for Soil Report
-  const reportData = {
-    fieldName: "North Field (Sector A)",
-    date: "May 23, 2026",
-    soilType: "Sandy Loam",
-    classification: "Class II (High Yield Potential)",
-    confidence: 94.8,
-    healthScore: 85,
-    pH: 6.5,
-    moisture: 45,
-    npk: { n: 78, p: 42, k: 88 },
-    riskFactors: [
-      {
-        id: "1",
-        name: "Fungal Spores",
-        risk: "Low",
-        icon: "bug-outline",
-        color: Colors.lightGreen,
-      },
-      {
-        id: "2",
-        name: "Root Rot Vulnerability",
-        risk: "Medium",
-        icon: "alert-circle-outline",
-        color: Colors.accentYellow,
-      },
-      {
-        id: "3",
-        name: "Nematodes",
-        risk: "None Detected",
-        icon: "shield-checkmark-outline",
-        color: Colors.lightGreen,
-      },
-    ],
-    improvements: [
-      "Incorporate 2 inches of composted organic matter to raise soil carbon.",
-      "Add bone meal or rock phosphate to target phosphorus deficiencies.",
-      "Plant cover crops (e.g. clover or alfalfa) to fix nitrogen naturally.",
-    ],
-  };
+  // ── Parse params ────────────────────────────────────────────────────────────
+  const prediction = params.prediction ?? "Unknown Soil";
+  const confidence = parseFloat(params.confidence ?? "0");
+  const imageUri = params.imageUri ?? null;
+  const isLowConfidence = params.lowConfidence === "true";
 
+  // Parse backend props (pH/NPK qualitative strings)
+  let backendProps: Record<string, string> | null = null;
+  if (params.props) {
+    try {
+      backendProps = JSON.parse(params.props);
+    } catch {
+      backendProps = null;
+    }
+  }
+
+  // Look up local profile
+  const profile: SoilProfile =
+    SOIL_PROFILES[prediction] ?? SOIL_PROFILES["Red Soil"];
+
+  // Derive NPK numbers from backend props if available, else from profile defaults
+  const npkN = backendProps?.Nitrogen_N
+    ? npkTextToValue(backendProps.Nitrogen_N)
+    : npkTextToValue(profile.treatments[0]); // fallback
+  const npkP = backendProps?.Phosphorus_P
+    ? npkTextToValue(backendProps.Phosphorus_P)
+    : 38;
+  const npkK = backendProps?.Potassium_K
+    ? npkTextToValue(backendProps.Potassium_K)
+    : 62;
+
+  // ── Entrance animations ─────────────────────────────────────────────────────
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const slideAnim = useRef(new Animated.Value(24)).current;
+
+  useEffect(() => {
+    Animated.parallel([
+      Animated.timing(fadeAnim, { toValue: 1, duration: 500, useNativeDriver: true }),
+      Animated.timing(slideAnim, { toValue: 0, duration: 420, useNativeDriver: true }),
+    ]).start();
+  }, []);
+
+  // ── Share ───────────────────────────────────────────────────────────────────
   const handleShare = async () => {
     try {
       await Share.share({
-        message: `SoilSense AI Report: ${reportData.fieldName} has a health score of ${reportData.healthScore}% (${reportData.soilType}, pH ${reportData.pH}). Recommended crops include Soybeans.`,
+        message: `SoilSense AI Report\nSoil Type: ${prediction}\nHealth Score: ${profile.healthScore}%\nAI Confidence: ${confidence.toFixed(1)}%\nClassification: ${profile.classification}\nRecommended crops: ${profile.crops.slice(0, 3).join(", ")}`,
       });
     } catch (error: any) {
       Alert.alert("Error", error.message);
     }
   };
 
-  const handleDownload = () => {
-    Alert.alert(
-      "Download Report",
-      "PDF report has been generated and saved to your device.",
-      [{ text: "Open File" }, { text: "Dismiss" }],
-    );
-  };
-
-  // Custom component to render pH slider
+  // ── pH bar ──────────────────────────────────────────────────────────────────
   const renderPhSlider = (val: number) => {
-    // 0 = acidic, 7 = neutral, 14 = alkaline
-    const positionPct = (val / 14) * 100;
+    const positionPct = Math.min(Math.max((val / 14) * 100, 4), 96);
     return (
       <View style={styles.phContainer}>
         <View style={styles.phTextRow}>
-          <ThemeText category="bodyBold" style={{ color: "#E57373" }}>
-            Acidic (0)
-          </ThemeText>
-          <ThemeText category="bodyBold" style={{ color: Colors.lightGreen }}>
-            Neutral (7)
-          </ThemeText>
-          <ThemeText category="bodyBold" style={{ color: "#81C784" }}>
-            Alkaline (14)
-          </ThemeText>
+          <Text style={[styles.phLabel, { color: "#E57373" }]}>Acidic</Text>
+          <Text style={[styles.phLabel, { color: Colors.lightGreen }]}>Neutral</Text>
+          <Text style={[styles.phLabel, { color: "#42A5F5" }]}>Alkaline</Text>
         </View>
         <View style={styles.phTrack}>
-          {/* Colors gradient blocks */}
-          <View
-            style={[
-              styles.phColorBlock,
-              {
-                backgroundColor: "#FFCDD2",
-                borderTopLeftRadius: 6,
-                borderBottomLeftRadius: 6,
-              },
-            ]}
-          />
-          <View style={[styles.phColorBlock, { backgroundColor: "#FFF9C4" }]} />
-          <View style={[styles.phColorBlock, { backgroundColor: "#C8E6C9" }]} />
-          <View style={[styles.phColorBlock, { backgroundColor: "#B2DFDB" }]} />
-          <View
-            style={[
-              styles.phColorBlock,
-              {
-                backgroundColor: "#B3E5FC",
-                borderTopRightRadius: 6,
-                borderBottomRightRadius: 6,
-              },
-            ]}
-          />
-
-          {/* pH Indicator Pin */}
-          <View style={[styles.phIndicatorPin, { left: `${positionPct}%` }]}>
+          <View style={[styles.phSeg, { backgroundColor: "#FFCDD2", borderTopLeftRadius: 8, borderBottomLeftRadius: 8 }]} />
+          <View style={[styles.phSeg, { backgroundColor: "#FFE0B2" }]} />
+          <View style={[styles.phSeg, { backgroundColor: "#FFF9C4" }]} />
+          <View style={[styles.phSeg, { backgroundColor: "#C8E6C9" }]} />
+          <View style={[styles.phSeg, { backgroundColor: "#B2DFDB" }]} />
+          <View style={[styles.phSeg, { backgroundColor: "#B3E5FC", borderTopRightRadius: 8, borderBottomRightRadius: 8 }]} />
+          {/* Pin */}
+          <View style={[styles.phPin, { left: `${positionPct}%` as any }]}>
             <View style={styles.phPinInner} />
           </View>
         </View>
         <View style={styles.phSummaryRow}>
-          <ThemeText category="h2" style={{ color: Colors.darkGreen }}>
-            pH {val}
-          </ThemeText>
-          <View style={styles.phStatusLabel}>
-            <ThemeText
-              category="caption"
-              style={{ color: Colors.darkGreen, fontWeight: "700" }}
-            >
-              SLIGHTLY ACIDIC (IDEAL)
-            </ThemeText>
+          <Text style={styles.phValue}>pH {val}</Text>
+          <View style={styles.phBadge}>
+            <Text style={styles.phBadgeText}>{profile.phStatus}</Text>
           </View>
         </View>
       </View>
     );
   };
 
+  // ── Confidence badge colour ─────────────────────────────────────────────────
+  const confColor = confidence >= 70
+    ? Colors.lightGreen
+    : confidence >= 45
+      ? Colors.accentYellow
+      : "#EF5350";
+
   return (
     <View style={[styles.container, { backgroundColor: themeColors.bg }]}>
-      {/* HEADER BAR */}
+      <StatusBar barStyle="dark-content" />
+
+      {/* ── HEADER ────────────────────────────────────────────────────────── */}
       <View style={[styles.header, { borderBottomColor: themeColors.border }]}>
-        <TouchableOpacity onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={24} color={themeColors.text} />
+        <TouchableOpacity style={styles.headerBtn} onPress={() => router.back()}>
+          <Ionicons name="arrow-back" size={20} color={themeColors.text} />
         </TouchableOpacity>
-        <ThemeText category="h2">Diagnostic Report</ThemeText>
-        <View style={styles.headerIcons}>
-          <TouchableOpacity onPress={handleShare} style={styles.headerIconBtn}>
-            <Ionicons name="share-outline" size={22} color={themeColors.text} />
-          </TouchableOpacity>
-          <TouchableOpacity
-            onPress={handleDownload}
-            style={styles.headerIconBtn}
-          >
-            <Ionicons
-              name="download-outline"
-              size={22}
-              color={themeColors.text}
-            />
-          </TouchableOpacity>
+        <View style={styles.headerCenter}>
+          <ThemeText category="h2" style={styles.headerTitle}>
+            Soil Report
+          </ThemeText>
+          <Text style={[styles.headerDate, { color: themeColors.subText }]}>
+            {new Date().toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}
+          </Text>
         </View>
+        <TouchableOpacity style={styles.headerBtn} onPress={handleShare}>
+          <Ionicons name="share-outline" size={20} color={themeColors.text} />
+        </TouchableOpacity>
       </View>
 
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
       >
-        {/* SOIL PREVIEW & CLASSIFICATION SUMMARY */}
-        <EarthyCard style={styles.summaryCard}>
-          <View style={styles.previewRow}>
-            {/* Mock captured soil image */}
-            <View style={styles.soilImagePreview}>
-              <View style={styles.soilTextureBg}>
-                <View style={styles.pebble1} />
-                <View style={styles.pebble2} />
-              </View>
-              <View style={styles.analysisOverlay}>
-                <Ionicons
-                  name="sparkles"
-                  size={20}
-                  color={Colors.accentYellow}
-                />
-                <Text style={styles.overlayText}>AI Scanned</Text>
+        <Animated.View style={{ opacity: fadeAnim, transform: [{ translateY: slideAnim }] }}>
+
+          {/* ── LOW CONFIDENCE BANNER ─────────────────────────────────────── */}
+          {isLowConfidence && (
+            <View style={styles.lowConfBanner}>
+              <Ionicons name="warning-outline" size={16} color="#F57F17" />
+              <Text style={styles.lowConfText}>
+                Low confidence ({confidence.toFixed(0)}%) — results are indicative. Try a clearer photo in better lighting.
+              </Text>
+            </View>
+          )}
+
+          {/* ── HERO CARD ─────────────────────────────────────────────────── */}
+          <View style={styles.heroCard}>
+            {/* Real captured image or fallback */}
+            <View style={styles.heroImageWrapper}>
+              {imageUri ? (
+                <Image source={{ uri: imageUri }} style={styles.heroImage} resizeMode="cover" />
+              ) : (
+                <View style={[styles.heroImage, styles.heroImageFallback]}>
+                  <Ionicons name="leaf" size={36} color={Colors.lightGreen} />
+                </View>
+              )}
+              <View style={styles.heroImageOverlay}>
+                <Ionicons name="sparkles" size={11} color={Colors.accentYellow} />
+                <Text style={styles.heroImageOverlayText}>AI SCANNED</Text>
               </View>
             </View>
 
-            <View style={styles.classDetails}>
-              <ThemeText category="caption" style={styles.sectorLabel}>
-                {reportData.fieldName}
-              </ThemeText>
-              <ThemeText category="h2" style={styles.soilTypeName}>
-                {reportData.soilType}
-              </ThemeText>
-              <ThemeText category="body" style={{ color: themeColors.subText }}>
-                {reportData.classification}
-              </ThemeText>
+            {/* Soil identity */}
+            <View style={styles.heroInfo}>
+              <Text style={[styles.heroClassification, { color: themeColors.subText }]}>
+                {profile.classification}
+              </Text>
+              <Text style={styles.heroSoilName}>{prediction}</Text>
 
-              {/* Confidence progress bar */}
-              <View style={styles.confidenceBox}>
-                <View style={styles.confidenceLabelRow}>
-                  <ThemeText category="caption">AI Confidence</ThemeText>
-                  <ThemeText category="caption" style={{ fontWeight: "700" }}>
-                    {reportData.confidence}%
-                  </ThemeText>
-                </View>
+              {/* Confidence meter */}
+              <View style={styles.confRow}>
+                <Text style={[styles.confLabel, { color: themeColors.subText }]}>
+                  AI Confidence
+                </Text>
+                <Text style={[styles.confValue, { color: confColor }]}>
+                  {confidence.toFixed(1)}%
+                </Text>
+              </View>
+              <View style={[styles.confTrack, { backgroundColor: themeColors.border }]}>
                 <View
                   style={[
-                    styles.confidenceBarBg,
-                    { backgroundColor: themeColors.border },
+                    styles.confFill,
+                    { width: `${Math.min(confidence, 100)}%` as any, backgroundColor: confColor },
                   ]}
-                >
-                  <View
-                    style={[
-                      styles.confidenceBarFill,
-                      { width: `${reportData.confidence}%` },
-                    ]}
-                  />
-                </View>
-              </View>
-            </View>
-          </View>
-        </EarthyCard>
-
-        {/* HEALTH SCORE GAUGE */}
-        <EarthyCard style={styles.gaugeCard}>
-          <ThemeText category="h3" style={styles.cardSectionTitle}>
-            Soil Health Status
-          </ThemeText>
-          <View style={styles.gaugeInnerContent}>
-            <HealthScoreGauge
-              score={reportData.healthScore}
-              size={130}
-              strokeWidth={9}
-            />
-            <View style={styles.gaugeDescBlock}>
-              <ThemeText category="bodyBold">
-                Excellent Soil Organic Carbon
-              </ThemeText>
-              <ThemeText category="caption" style={styles.gaugeDescText}>
-                Your soil is rich in microbiological activity and demonstrates
-                good root aeration. Water absorption and drainage ratios are
-                highly balanced.
-              </ThemeText>
-            </View>
-          </View>
-        </EarthyCard>
-
-        {/* pH VISUALIZATION */}
-        <EarthyCard style={styles.pHCard}>
-          <ThemeText category="h3" style={styles.cardSectionTitle}>
-            Acidity Level (pH)
-          </ThemeText>
-          {renderPhSlider(reportData.pH)}
-        </EarthyCard>
-
-        {/* MOISTURE ANALYTICS */}
-        <EarthyCard style={styles.moistureCard}>
-          <ThemeText category="h3" style={styles.cardSectionTitle}>
-            Moisture Analytics
-          </ThemeText>
-          <View style={styles.moistureRow}>
-            <View style={styles.moistureMetricBox}>
-              <Ionicons name="water" size={32} color="#42A5F5" />
-              <View style={{ marginLeft: 12 }}>
-                <ThemeText category="h2">{reportData.moisture}%</ThemeText>
-                <ThemeText category="caption">Volumetric Moisture</ThemeText>
-              </View>
-            </View>
-            <View style={styles.moistureBadge}>
-              <ThemeText
-                category="caption"
-                style={{ color: Colors.darkGreen, fontWeight: "700" }}
-              >
-                STABLE MOISTURE
-              </ThemeText>
-            </View>
-          </View>
-          <ThemeText category="caption" style={styles.moistureDesc}>
-            Moisture readings indicate the loam retains irrigation properly.
-            Ideal for seeding high-demand crops within the next 5 days.
-          </ThemeText>
-        </EarthyCard>
-
-        {/* NPK NUTRIENT GRAPHS */}
-        <EarthyCard style={styles.npkCard}>
-          <ThemeText category="h3" style={styles.cardSectionTitle}>
-            Nutrient Levels (NPK)
-          </ThemeText>
-          <NPKChart
-            n={reportData.npk.n}
-            p={reportData.npk.p}
-            k={reportData.npk.k}
-          />
-
-          <View style={styles.npkNoteBox}>
-            <Ionicons
-              name="information-circle-outline"
-              size={16}
-              color="#E65100"
-              style={{ marginTop: 2 }}
-            />
-            <ThemeText category="caption" style={styles.npkNoteText}>
-              <ThemeText category="bodyBold" style={{ color: "#E65100" }}>
-                Warning:{" "}
-              </ThemeText>
-              Phosphorus (P) levels are low (42%). This might limit root system
-              expansions on young plants. Consider targeted phosphate boosters.
-            </ThemeText>
-          </View>
-        </EarthyCard>
-
-        {/* AI EXPLANATION SECTION */}
-        <EarthyCard style={styles.explanationCard}>
-          <View style={styles.aiHeaderRow}>
-            <Ionicons name="sparkles" size={20} color={Colors.darkGreen} />
-            <ThemeText
-              category="h3"
-              style={{ marginLeft: 8, color: Colors.darkGreen }}
-            >
-              SoilSense AI Analysis
-            </ThemeText>
-          </View>
-          <ThemeText category="body" style={styles.aiText}>
-            “The soil profile shows an optimal Sandy Loam texture ideal for
-            summer sowing. Due to last winter&apos;s crop, Nitrogen remains
-            moderate but Phosphorus has depleted by 15%. Soil microbial activity
-            is strong, supported by a healthy pH of 6.5. There is low fungal
-            risk, though crop rotation is recommended to prevent root pathogen
-            buildup.”
-          </ThemeText>
-        </EarthyCard>
-
-        {/* DISEASE RISK INDICATORS */}
-        <EarthyCard style={styles.riskCard}>
-          <ThemeText category="h3" style={styles.cardSectionTitle}>
-            Pathogen & Disease Risks
-          </ThemeText>
-          {reportData.riskFactors.map((risk) => (
-            <View key={risk.id} style={styles.riskRow}>
-              <View style={styles.riskLabelPart}>
-                <Ionicons
-                  name={risk.icon as any}
-                  size={18}
-                  color={themeColors.text}
                 />
-                <ThemeText category="body" style={{ marginLeft: 10 }}>
-                  {risk.name}
-                </ThemeText>
               </View>
-              <View
-                style={[
-                  styles.riskBadge,
-                  { backgroundColor: risk.color + "20" },
-                ]}
-              >
-                <Text style={[styles.riskBadgeText, { color: risk.color }]}>
-                  {risk.risk}
+            </View>
+          </View>
+
+          {/* ── HEALTH SCORE ──────────────────────────────────────────────── */}
+          <EarthyCard style={styles.card}>
+            <Text style={[styles.sectionTitle, { color: themeColors.text }]}>
+              Soil Health Score
+            </Text>
+            <View style={styles.gaugeRow}>
+              <HealthScoreGauge score={profile.healthScore} size={120} strokeWidth={9} />
+              <View style={styles.gaugeDesc}>
+                <Text style={[styles.gaugeHeadline, { color: themeColors.text }]}>
+                  {profile.healthScore >= 75
+                    ? "Excellent Condition"
+                    : profile.healthScore >= 55
+                      ? "Moderate Fertility"
+                      : "Needs Amendment"}
+                </Text>
+                <Text style={[styles.gaugeBody, { color: themeColors.subText }]}>
+                  {profile.aiSummary.slice(0, 120)}…
                 </Text>
               </View>
             </View>
-          ))}
-        </EarthyCard>
+          </EarthyCard>
 
-        {/* SUGGESTED IMPROVEMENTS */}
-        <EarthyCard style={styles.improvementsCard}>
-          <ThemeText
-            category="h3"
-            style={[styles.cardSectionTitle, { color: Colors.white }]}
-          >
-            Suggested Soil Treatments
-          </ThemeText>
-          {reportData.improvements.map((improvement, index) => (
-            <View key={index} style={styles.impBulletRow}>
-              <View style={styles.impNumberCircle}>
-                <Text style={styles.impNumberText}>{index + 1}</Text>
-              </View>
-              <ThemeText category="body" style={styles.impText}>
-                {improvement}
-              </ThemeText>
+          {/* ── AI SUMMARY ────────────────────────────────────────────────── */}
+          <View style={styles.aiCard}>
+            <View style={styles.aiCardHeader}>
+              <Ionicons name="sparkles" size={16} color={Colors.accentYellow} />
+              <Text style={styles.aiCardTitle}>SoilSense AI Analysis</Text>
             </View>
-          ))}
-        </EarthyCard>
+            <Text style={styles.aiCardBody}>{profile.aiSummary}</Text>
+          </View>
 
-        {/* ACTION CTAs */}
-        <View style={styles.ctaRow}>
-          <EarthyButton
-            title="Recommended Crops"
-            variant="primary"
-            icon="leaf-outline"
-            onPress={() => router.push("/crops")}
-            style={styles.ctaHalfBtn}
-          />
-          <EarthyButton
-            title="Fertilizer Treatment"
-            variant="secondary"
-            icon="flask-outline"
-            onPress={() => router.push("/fertilizer")}
-            style={styles.ctaHalfBtn}
-          />
-        </View>
+          {/* ── pH ────────────────────────────────────────────────────────── */}
+          <EarthyCard style={styles.card}>
+            <Text style={[styles.sectionTitle, { color: themeColors.text }]}>
+              Acidity Level (pH)
+            </Text>
+            {renderPhSlider(profile.phValue)}
+          </EarthyCard>
 
-        <EarthyButton
-          title="Return to Dashboard"
-          variant="outline"
-          icon="home-outline"
-          onPress={() => router.replace("/root/tab/home")}
-          style={{ width: "100%", marginBottom: 12 }}
-        />
+          {/* ── MOISTURE ──────────────────────────────────────────────────── */}
+          <EarthyCard style={styles.card}>
+            <Text style={[styles.sectionTitle, { color: themeColors.text }]}>
+              Moisture Content
+            </Text>
+            <View style={styles.moistureRow}>
+              <View style={styles.moistureLeft}>
+                <Ionicons name="water" size={30} color="#42A5F5" />
+                <View style={{ marginLeft: 10 }}>
+                  <Text style={[styles.moistureValue, { color: themeColors.text }]}>
+                    {profile.moisture}%
+                  </Text>
+                  <Text style={[styles.moistureSub, { color: themeColors.subText }]}>
+                    Volumetric
+                  </Text>
+                </View>
+              </View>
+              <View style={[styles.moistureBadge, {
+                backgroundColor:
+                  profile.moisture >= 45 ? Colors.lightGreen + "20"
+                    : profile.moisture >= 25 ? Colors.accentYellow + "20"
+                      : "#EF535020"
+              }]}>
+                <Text style={[styles.moistureBadgeText, {
+                  color:
+                    profile.moisture >= 45 ? Colors.darkGreen
+                      : profile.moisture >= 25 ? "#E65100"
+                        : "#C62828"
+                }]}>
+                  {profile.moistureLabel}
+                </Text>
+              </View>
+            </View>
+            {/* Moisture bar */}
+            <View style={[styles.moistureTrack, { backgroundColor: themeColors.border, marginTop: 14 }]}>
+              <View
+                style={[
+                  styles.moistureFill,
+                  {
+                    width: `${profile.moisture}%` as any,
+                    backgroundColor:
+                      profile.moisture >= 45 ? Colors.lightGreen
+                        : profile.moisture >= 25 ? Colors.accentYellow
+                          : "#EF5350",
+                  },
+                ]}
+              />
+            </View>
+          </EarthyCard>
+
+          {/* ── NPK ───────────────────────────────────────────────────────── */}
+          <EarthyCard style={styles.card}>
+            <Text style={[styles.sectionTitle, { color: themeColors.text }]}>
+              Nutrient Levels (NPK)
+            </Text>
+            {/* Qualitative source labels if backend provided them */}
+            {backendProps && (
+              <View style={styles.npkQualRow}>
+                <View style={styles.npkQualChip}>
+                  <Text style={styles.npkQualKey}>N</Text>
+                  <Text style={[styles.npkQualVal, { color: themeColors.subText }]}>
+                    {backendProps.Nitrogen_N ?? "—"}
+                  </Text>
+                </View>
+                <View style={styles.npkQualChip}>
+                  <Text style={styles.npkQualKey}>P</Text>
+                  <Text style={[styles.npkQualVal, { color: themeColors.subText }]}>
+                    {backendProps.Phosphorus_P ?? "—"}
+                  </Text>
+                </View>
+                <View style={styles.npkQualChip}>
+                  <Text style={styles.npkQualKey}>K</Text>
+                  <Text style={[styles.npkQualVal, { color: themeColors.subText }]}>
+                    {backendProps.Potassium_K ?? "—"}
+                  </Text>
+                </View>
+              </View>
+            )}
+            <NPKChart n={npkN} p={npkP} k={npkK} />
+            {profile.npkWarning && (
+              <View style={styles.npkWarning}>
+                <Ionicons name="warning-outline" size={15} color="#E65100" style={{ marginTop: 1 }} />
+                <Text style={styles.npkWarningText}>{profile.npkWarning}</Text>
+              </View>
+            )}
+          </EarthyCard>
+
+          {/* ── DISEASE RISKS ─────────────────────────────────────────────── */}
+          <EarthyCard style={styles.card}>
+            <Text style={[styles.sectionTitle, { color: themeColors.text }]}>
+              Pathogen & Disease Risk
+            </Text>
+            {profile.riskFactors.map((risk, i) => (
+              <View
+                key={i}
+                style={[
+                  styles.riskRow,
+                  i < profile.riskFactors.length - 1 && { borderBottomWidth: 1, borderBottomColor: themeColors.border },
+                ]}
+              >
+                <View style={styles.riskLeft}>
+                  <View style={[styles.riskIconBox, { backgroundColor: risk.color + "18" }]}>
+                    <Ionicons name={risk.icon as any} size={16} color={risk.color} />
+                  </View>
+                  <Text style={[styles.riskName, { color: themeColors.text }]}>{risk.name}</Text>
+                </View>
+                <View style={[styles.riskBadge, { backgroundColor: risk.color + "20" }]}>
+                  <Text style={[styles.riskBadgeText, { color: risk.color }]}>{risk.risk}</Text>
+                </View>
+              </View>
+            ))}
+          </EarthyCard>
+
+          {/* ── CROPS ─────────────────────────────────────────────────────── */}
+          <EarthyCard style={styles.card}>
+            <Text style={[styles.sectionTitle, { color: themeColors.text }]}>
+              Recommended Crops
+            </Text>
+            <View style={styles.cropsGrid}>
+              {profile.crops.map((crop, i) => (
+                <View key={i} style={styles.cropChip}>
+                  <Ionicons name="leaf" size={11} color={Colors.darkGreen} />
+                  <Text style={styles.cropChipText}>{crop}</Text>
+                </View>
+              ))}
+            </View>
+          </EarthyCard>
+
+          {/* ── TREATMENTS ────────────────────────────────────────────────── */}
+          <View style={styles.treatmentsCard}>
+            <View style={styles.treatmentsHeader}>
+              <Ionicons name="flask" size={16} color={Colors.accentYellow} />
+              <Text style={styles.treatmentsTitle}>Suggested Treatments</Text>
+            </View>
+            {profile.treatments.map((t, i) => (
+              <View key={i} style={styles.treatmentRow}>
+                <View style={styles.treatmentNum}>
+                  <Text style={styles.treatmentNumText}>{i + 1}</Text>
+                </View>
+                <Text style={styles.treatmentText}>{t}</Text>
+              </View>
+            ))}
+          </View>
+
+          {/* ── CTAs ──────────────────────────────────────────────────────── */}
+          <TouchableOpacity
+            style={styles.scanAgainBtn}
+            onPress={() => router.replace("/root/tab/scan")}
+            activeOpacity={0.85}
+          >
+            <Ionicons name="camera-outline" size={18} color={Colors.white} />
+            <Text style={styles.scanAgainText}>Scan Another Sample</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.homeBtn, { borderColor: themeColors.border }]}
+            onPress={() => router.replace("/root/tab/home")}
+            activeOpacity={0.8}
+          >
+            <Ionicons name="home-outline" size={16} color={themeColors.text} />
+            <Text style={[styles.homeBtnText, { color: themeColors.text }]}>
+              Return to Dashboard
+            </Text>
+          </TouchableOpacity>
+
+        </Animated.View>
       </ScrollView>
     </View>
   );
 }
 
+// ─── Styles ────────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
+  container: { flex: 1 },
+
   header: {
     flexDirection: "row",
+    alignItems: "center",
     justifyContent: "space-between",
+    paddingHorizontal: 20,
+    paddingTop: Platform.OS === "ios" ? 56 : (StatusBar.currentHeight ?? 24) + 12,
+    paddingBottom: 14,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  headerBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
     alignItems: "center",
-    paddingHorizontal: 24,
-    paddingTop: 56,
-    paddingBottom: 16,
-    borderBottomWidth: 1,
+    justifyContent: "center",
   },
-  headerIcons: {
-    flexDirection: "row",
-  },
-  headerIconBtn: {
-    marginLeft: 16,
-    padding: 4,
-  },
+  headerCenter: { alignItems: "center" },
+  headerTitle: { fontWeight: "800", fontSize: 16 },
+  headerDate: { fontSize: 11, marginTop: 1 },
+
   scrollContent: {
-    paddingHorizontal: 24,
+    paddingHorizontal: 18,
     paddingTop: 16,
-    paddingBottom: 40,
+    paddingBottom: 48,
   },
-  summaryCard: {
-    padding: 14,
-    borderRadius: 20,
-    marginBottom: 16,
+
+  // Low confidence banner
+  lowConfBanner: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    backgroundColor: "#FFF3E0",
+    borderWidth: 1,
+    borderColor: "#FFB300",
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 14,
+    gap: 8,
   },
-  previewRow: {
+  lowConfText: {
+    flex: 1,
+    fontSize: 12,
+    color: "#E65100",
+    lineHeight: 17,
+    fontWeight: "500",
+  },
+
+  // Hero card
+  heroCard: {
     flexDirection: "row",
     alignItems: "center",
+    backgroundColor: Colors.darkGreen,
+    borderRadius: 22,
+    padding: 16,
+    marginBottom: 14,
+    shadowColor: Colors.darkGreen,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.3,
+    shadowRadius: 16,
+    elevation: 8,
   },
-  soilImagePreview: {
-    width: 90,
-    height: 90,
-    borderRadius: 16,
-    overflow: "hidden",
-    position: "relative",
-  },
-  soilTextureBg: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: Colors.brown,
-  },
-  pebble1: {
-    position: "absolute",
-    width: 30,
-    height: 20,
-    borderRadius: 10,
-    backgroundColor: "#6D4C41",
-    top: 20,
-    left: 10,
-  },
-  pebble2: {
-    position: "absolute",
-    width: 40,
-    height: 35,
+  heroImageWrapper: {
+    width: 92,
+    height: 92,
     borderRadius: 18,
-    backgroundColor: "#4E342E",
-    bottom: 10,
-    right: 15,
+    overflow: "hidden",
+    borderWidth: 2,
+    borderColor: Colors.lightGreen + "60",
   },
-  analysisOverlay: {
+  heroImage: { width: "100%", height: "100%" },
+  heroImageFallback: {
+    backgroundColor: Colors.lightGreen + "20",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  heroImageOverlay: {
     position: "absolute",
     bottom: 0,
     width: "100%",
-    backgroundColor: "rgba(27,94,32,0.8)",
+    backgroundColor: "rgba(0,0,0,0.5)",
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    paddingVertical: 3,
+    paddingVertical: 4,
+    gap: 3,
   },
-  overlayText: {
-    color: Colors.white,
-    fontSize: 9,
-    fontWeight: "700",
-    marginLeft: 3,
-  },
-  classDetails: {
-    flex: 1,
-    marginLeft: 16,
-  },
-  sectorLabel: {
-    fontWeight: "600",
-  },
-  soilTypeName: {
-    fontSize: 18,
+  heroImageOverlayText: {
+    color: Colors.accentYellow,
+    fontSize: 8,
     fontWeight: "800",
-    marginVertical: 2,
+    letterSpacing: 0.6,
   },
-  confidenceBox: {
-    marginTop: 10,
+  heroInfo: { flex: 1, marginLeft: 14 },
+  heroClassification: {
+    fontSize: 10,
+    fontWeight: "600",
+    letterSpacing: 0.3,
+    color: "rgba(255,255,255,0.65)",
+    marginBottom: 3,
   },
-  confidenceLabelRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginBottom: 4,
+  heroSoilName: {
+    fontSize: 22,
+    fontWeight: "900",
+    color: Colors.white,
+    letterSpacing: -0.4,
+    marginBottom: 10,
   },
-  confidenceBarBg: {
+  confRow: { flexDirection: "row", justifyContent: "space-between", marginBottom: 4 },
+  confLabel: { fontSize: 11, fontWeight: "500", color: "rgba(255,255,255,0.6)" },
+  confValue: { fontSize: 11, fontWeight: "800" },
+  confTrack: {
     height: 6,
     borderRadius: 3,
+    backgroundColor: "rgba(255,255,255,0.15)",
+    overflow: "hidden",
   },
-  confidenceBarFill: {
-    height: "100%",
-    backgroundColor: Colors.lightGreen,
-    borderRadius: 3,
-  },
-  cardSectionTitle: {
-    fontWeight: "800",
-    marginBottom: 12,
-  },
-  gaugeCard: {
+  confFill: { height: "100%", borderRadius: 3 },
+
+  // Generic card
+  card: { borderRadius: 20, padding: 16, marginBottom: 14 },
+  sectionTitle: { fontSize: 15, fontWeight: "800", marginBottom: 14, letterSpacing: -0.2 },
+
+  // Health gauge
+  gaugeRow: { flexDirection: "row", alignItems: "center" },
+  gaugeDesc: { flex: 1, marginLeft: 14 },
+  gaugeHeadline: { fontSize: 14, fontWeight: "800", marginBottom: 5 },
+  gaugeBody: { fontSize: 12, lineHeight: 17 },
+
+  // AI card
+  aiCard: {
+    backgroundColor: Colors.darkGreen + "0D",
+    borderWidth: 1,
+    borderColor: Colors.darkGreen + "25",
     borderRadius: 20,
     padding: 16,
-    marginBottom: 16,
+    marginBottom: 14,
   },
-  gaugeInnerContent: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
+  aiCardHeader: { flexDirection: "row", alignItems: "center", gap: 7, marginBottom: 10 },
+  aiCardTitle: { fontSize: 14, fontWeight: "800", color: Colors.darkGreen },
+  aiCardBody: {
+    fontSize: 13,
+    lineHeight: 20,
+    color: Colors.darkGreen,
+    fontStyle: "italic",
   },
-  gaugeDescBlock: {
-    flex: 1,
-    marginLeft: 16,
-  },
-  gaugeDescText: {
-    marginTop: 4,
-    lineHeight: 16,
-  },
-  pHCard: {
-    borderRadius: 20,
-    padding: 16,
-    marginBottom: 16,
-  },
-  phContainer: {
-    marginVertical: 6,
-  },
-  phTextRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginBottom: 6,
-  },
-  phTrack: {
-    height: 12,
-    flexDirection: "row",
-    position: "relative",
-    marginBottom: 12,
-  },
-  phColorBlock: {
-    flex: 1,
-  },
-  phIndicatorPin: {
+
+  // pH
+  phContainer: { marginTop: 4 },
+  phTextRow: { flexDirection: "row", justifyContent: "space-between", marginBottom: 7 },
+  phLabel: { fontSize: 10, fontWeight: "700" },
+  phTrack: { height: 14, flexDirection: "row", position: "relative", borderRadius: 7, overflow: "visible", marginBottom: 14 },
+  phSeg: { flex: 1 },
+  phPin: {
     position: "absolute",
     top: -4,
-    width: 20,
-    height: 20,
-    borderRadius: 10,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
     backgroundColor: Colors.darkGreen,
     alignItems: "center",
     justifyContent: "center",
-    marginLeft: -10,
+    marginLeft: -11,
+    shadowColor: Colors.darkGreen,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.4,
+    shadowRadius: 6,
+    elevation: 4,
   },
-  phPinInner: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: Colors.white,
-  },
-  phSummaryRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginTop: 6,
-  },
-  phStatusLabel: {
+  phPinInner: { width: 10, height: 10, borderRadius: 5, backgroundColor: Colors.white },
+  phSummaryRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  phValue: { fontSize: 20, fontWeight: "900", color: Colors.darkGreen },
+  phBadge: {
     backgroundColor: Colors.lightGreen + "20",
-    paddingHorizontal: 8,
+    paddingHorizontal: 10,
     paddingVertical: 4,
-    borderRadius: 8,
-  },
-  moistureCard: {
-    borderRadius: 20,
-    padding: 16,
-    marginBottom: 16,
-  },
-  moistureRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-  },
-  moistureMetricBox: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  moistureBadge: {
-    backgroundColor: Colors.lightGreen + "20",
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 8,
-  },
-  moistureDesc: {
-    marginTop: 12,
-    lineHeight: 16,
-  },
-  npkCard: {
-    borderRadius: 20,
-    padding: 16,
-    marginBottom: 16,
-  },
-  npkNoteBox: {
-    marginTop: 16,
-    flexDirection: "row",
-    alignItems: "flex-start",
-    backgroundColor: "#FFE0B2",
-    padding: 12,
-    borderRadius: 12,
-  },
-  npkNoteText: {
-    flex: 1,
-    marginLeft: 8,
-    lineHeight: 16,
-    color: "#E65100",
-  },
-  explanationCard: {
-    backgroundColor: Colors.lightGreen + "12",
-    borderRadius: 20,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: Colors.lightGreen + "40",
-    marginBottom: 16,
-  },
-  aiHeaderRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 8,
-  },
-  aiText: {
-    fontStyle: "italic",
-    lineHeight: 20,
-    color: Colors.darkGreen,
-  },
-  riskCard: {
-    borderRadius: 20,
-    padding: 16,
-    marginBottom: 16,
-  },
-  riskRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.lightGray,
-    paddingVertical: 10,
-  },
-  riskLabelPart: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  riskBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 8,
-  },
-  riskBadgeText: {
-    fontSize: 10,
-    fontWeight: "700",
-  },
-  improvementsCard: {
-    backgroundColor: Colors.brown,
-    borderRadius: 20,
-    padding: 16,
-    marginBottom: 20,
-  },
-  impBulletRow: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    marginVertical: 6,
-  },
-  impNumberCircle: {
-    width: 20,
-    height: 20,
     borderRadius: 10,
+  },
+  phBadgeText: { fontSize: 9, fontWeight: "800", color: Colors.darkGreen, letterSpacing: 0.3 },
+
+  // Moisture
+  moistureRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  moistureLeft: { flexDirection: "row", alignItems: "center" },
+  moistureValue: { fontSize: 24, fontWeight: "900" },
+  moistureSub: { fontSize: 11 },
+  moistureBadge: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 10 },
+  moistureBadgeText: { fontSize: 10, fontWeight: "800", letterSpacing: 0.3 },
+  moistureTrack: { height: 8, borderRadius: 4, overflow: "hidden" },
+  moistureFill: { height: "100%", borderRadius: 4 },
+
+  // NPK qualitative row
+  npkQualRow: {
+    flexDirection: "row",
+    gap: 8,
+    marginBottom: 14,
+  },
+  npkQualChip: {
+    flex: 1,
+    backgroundColor: Colors.darkGreen + "0D",
+    borderRadius: 10,
+    padding: 8,
+    alignItems: "center",
+  },
+  npkQualKey: { fontSize: 13, fontWeight: "900", color: Colors.darkGreen },
+  npkQualVal: { fontSize: 10, fontWeight: "500", textAlign: "center", marginTop: 2 },
+  npkWarning: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    backgroundColor: "#FFF3E0",
+    borderRadius: 12,
+    padding: 11,
+    marginTop: 14,
+    gap: 7,
+  },
+  npkWarningText: { flex: 1, fontSize: 12, color: "#E65100", lineHeight: 17 },
+
+  // Risk
+  riskRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingVertical: 11 },
+  riskLeft: { flexDirection: "row", alignItems: "center", gap: 10 },
+  riskIconBox: { width: 32, height: 32, borderRadius: 10, alignItems: "center", justifyContent: "center" },
+  riskName: { fontSize: 13, fontWeight: "600" },
+  riskBadge: { paddingHorizontal: 9, paddingVertical: 3, borderRadius: 8 },
+  riskBadgeText: { fontSize: 10, fontWeight: "800" },
+
+  // Crops
+  cropsGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  cropChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: Colors.darkGreen + "0E",
+    borderWidth: 1,
+    borderColor: Colors.darkGreen + "22",
+    borderRadius: 20,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    gap: 5,
+  },
+  cropChipText: { fontSize: 12, fontWeight: "700", color: Colors.darkGreen },
+
+  // Treatments
+  treatmentsCard: {
+    backgroundColor: Colors.darkGreen,
+    borderRadius: 20,
+    padding: 18,
+    marginBottom: 14,
+  },
+  treatmentsHeader: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 14 },
+  treatmentsTitle: { fontSize: 15, fontWeight: "800", color: Colors.white },
+  treatmentRow: { flexDirection: "row", alignItems: "flex-start", marginBottom: 12, gap: 10 },
+  treatmentNum: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
     backgroundColor: Colors.accentYellow,
     alignItems: "center",
     justifyContent: "center",
-    marginTop: 2,
+    marginTop: 1,
+    flexShrink: 0,
   },
-  impNumberText: {
-    fontSize: 10,
-    fontWeight: "800",
-    color: "#2E3A2F",
-  },
-  impText: {
-    flex: 1,
-    marginLeft: 10,
-    color: Colors.white,
-    fontSize: 13,
-  },
-  ctaRow: {
+  treatmentNumText: { fontSize: 10, fontWeight: "900", color: "#1B2E1C" },
+  treatmentText: { flex: 1, fontSize: 13, color: "rgba(255,255,255,0.9)", lineHeight: 19 },
+
+  // CTAs
+  scanAgainBtn: {
     flexDirection: "row",
-    justifyContent: "space-between",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: Colors.darkGreen,
+    paddingVertical: 15,
+    borderRadius: 16,
+    gap: 8,
     marginBottom: 10,
+    shadowColor: Colors.darkGreen,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 10,
+    elevation: 6,
   },
-  ctaHalfBtn: {
-    flex: 1,
-    marginHorizontal: 4,
+  scanAgainText: { fontSize: 15, fontWeight: "800", color: Colors.white },
+  homeBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1.5,
+    paddingVertical: 13,
+    borderRadius: 16,
+    gap: 7,
+    marginBottom: 8,
   },
+  homeBtnText: { fontSize: 14, fontWeight: "700" },
 });

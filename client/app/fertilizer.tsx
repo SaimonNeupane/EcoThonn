@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   StyleSheet,
   View,
@@ -6,133 +6,222 @@ import {
   TouchableOpacity,
   Alert,
   Text,
+  ActivityIndicator,
 } from "react-native";
-import { useRouter } from "expo-router";
 import {
   EarthyCard,
   ThemeText,
-  EarthyButton,
   Colors,
   useThemeColors,
 } from "../components/DesignSystem";
 import { Ionicons } from "@expo/vector-icons";
+import { useLocation } from "../hooks/useLocation";
 
-export default function FertilizerScreen() {
-  const router = useRouter();
+const API_KEY = "c5d369f4fe4e4ffa9ed83005262405";
+const BASE_URL = "https://api.weatherapi.com/v1";
+
+interface WeatherData {
+  location: {
+    name: string;
+    region: string;
+    country: string;
+  };
+  current: {
+    temp_c: number;
+    feelslike_c: number;
+    condition: {
+      text: string;
+      icon: string;
+      code: number;
+    };
+    humidity: number;
+    wind_mph: number;
+    wind_dir: string;
+    uv: number;
+    precip_mm: number;
+  };
+}
+
+interface ForecastData {
+  forecast: {
+    forecastday: {
+      date: string;
+      day: {
+        maxtemp_c: number;
+        mintemp_c: number;
+        daily_chance_of_rain: number;
+        condition: {
+          text: string;
+          code: number;
+        };
+        uv: number;
+      };
+    }[];
+  };
+}
+
+export default function WeatherScreen() {
   const themeColors = useThemeColors();
+  const { location, fetchLocation, loading: locationLoading } = useLocation();
 
-  // Dynamic land size state
-  const [acreage, setAcreage] = useState(5); // default 5 acres
+  const [weatherData, setWeatherData] = useState<WeatherData | null>(null);
+  const [forecastData, setForecastData] = useState<ForecastData | null>(null);
+  const [loading, setLoading] = useState(true);
 
-  // Base dosages per acre
-  const organicTreatments = [
-    {
-      id: "o1",
-      name: "Organic Compost",
-      baseDose: 2.5,
-      unit: "Tons",
-      schedule: "Pre-sowing (basal)",
-      desc: "Builds humus, raises microbial count, stabilizes pH levels.",
-    },
-    {
-      id: "o2",
-      name: "Bone Meal (Phosphorus)",
-      baseDose: 150,
-      unit: "lbs",
-      schedule: "At sowing time",
-      desc: "Concentrated natural phosphorus to aid seedling root development.",
-    },
-    {
-      id: "o3",
-      name: "Green Manures (Cover Crop)",
-      baseDose: 1,
-      unit: "planting",
-      schedule: "Post-harvest",
-      desc: "Grow clover or alfalfa in off-season to trap nitrogen organically.",
-    },
-  ];
+  // Map weather condition codes to Ionicons
+  const getWeatherIcon = (code: number): any => {
+    if (code === 1000) return "sunny";
+    if ([1003, 1006].includes(code)) return "partly-sunny";
+    if ([1009, 1030, 1135, 1147].includes(code)) return "cloudy";
+    if ([1063, 1180, 1183, 1186, 1189, 1192, 1195, 1240, 1243, 1246].includes(code))
+      return "rainy";
+    if ([1087, 1273, 1276].includes(code)) return "thunderstorm";
+    if ([1066, 1069, 1072, 1114, 1117, 1210, 1213, 1216, 1219, 1222, 1225, 1237, 1249, 1252, 1255, 1258, 1261, 1264].includes(code))
+      return "snow";
+    return "partly-sunny";
+  };
 
-  const chemicalTreatments = [
-    {
-      id: "c1",
-      name: "DAP (Diammonium Phosphate)",
-      baseDose: 120,
-      unit: "lbs",
-      schedule: "At sowing",
-      desc: "Fast-acting phosphorus boost to resolve critical deficiency.",
-    },
-    {
-      id: "c2",
-      name: "Urea (Nitrogen Source)",
-      baseDose: 80,
-      unit: "lbs",
-      schedule: "Week 3 & Week 6 (splits)",
-      desc: "Essential for vegetative green growth and leaf chlorophyll.",
-    },
-    {
-      id: "c3",
-      name: "Muriate of Potash (K)",
-      baseDose: 40,
-      unit: "lbs",
-      schedule: "Pre-planting",
-      desc: "Ensures crop disease resilience and water retention.",
-    },
-  ];
+  const getWeatherIconColor = (code: number): string => {
+    if (code === 1000) return "#FFB300";
+    if ([1003, 1006].includes(code)) return "#FFA726";
+    if ([1063, 1180, 1183, 1186, 1189, 1192, 1195, 1240, 1243, 1246].includes(code))
+      return "#42A5F5";
+    if ([1087, 1273, 1276].includes(code)) return "#0288D1";
+    if ([1066, 1069, 1072, 1114, 1117, 1210, 1213, 1216, 1219, 1222, 1225, 1237, 1249, 1252, 1255, 1258, 1261, 1264].includes(code))
+      return "#90CAF9";
+    return "#9E9E9E";
+  };
 
-  const timelineSteps = [
-    {
-      week: "Week 1",
-      title: "Soil Preparation",
-      desc: "Till land and apply Organic Compost and Potash. Let soil settle for 3 days.",
-    },
-    {
-      week: "Week 2",
-      title: "Sowing & Basal Feed",
-      desc: "Apply DAP / Bone Meal directly in crop furrows during seeding.",
-    },
-    {
-      week: "Week 3",
-      title: "First Nitrogen Dressing",
-      desc: "Top-dress first split of Urea (40 lbs/acre) after early sprouts break soil.",
-    },
-    {
-      week: "Week 6",
-      title: "Second Nitrogen Dressing",
-      desc: "Apply final Urea top-dress (40 lbs/acre) before vegetative bloom.",
-    },
-  ];
+  const getUVDescription = (uv: number): string => {
+    if (uv <= 2) return "Low";
+    if (uv <= 5) return "Moderate";
+    if (uv <= 7) return "High";
+    if (uv <= 10) return "Very High";
+    return "Extreme";
+  };
 
-  const changeAcreage = (amount: number) => {
-    const newAcreage = acreage + amount;
-    if (newAcreage >= 1 && newAcreage <= 200) {
-      setAcreage(newAcreage);
+  const getDayName = (dateString: string, index: number): string => {
+    if (index === 0) return "Today";
+    if (index === 1) return "Tomorrow";
+    const date = new Date(dateString);
+    return date.toLocaleDateString("en-US", { weekday: "short" });
+  };
+
+  const fetchWeatherData = async (lat: number, lon: number) => {
+    try {
+      setLoading(true);
+
+      // Fetch current weather
+      const currentResponse = await fetch(
+        `${BASE_URL}/current.json?key=${API_KEY}&q=${lat},${lon}&aqi=no`
+      );
+
+      if (!currentResponse.ok) {
+        throw new Error("Failed to fetch current weather");
+      }
+
+      const currentData = await currentResponse.json();
+
+      // Fetch 5-day forecast
+      const forecastResponse = await fetch(
+        `${BASE_URL}/forecast.json?key=${API_KEY}&q=${lat},${lon}&days=5&aqi=no`
+      );
+
+      if (!forecastResponse.ok) {
+        throw new Error("Failed to fetch forecast");
+      }
+
+      const forecastDataResponse = await forecastResponse.json();
+
+      setWeatherData(currentData);
+      setForecastData(forecastDataResponse);
+      setLoading(false);
+    } catch (error) {
+      console.error("Error fetching weather:", error);
+      Alert.alert("Error", "Failed to fetch weather data. Please try again.");
+      setLoading(false);
     }
   };
+
+  useEffect(() => {
+    const initializeWeather = async () => {
+      let coords = location;
+
+      // If no location yet, try to fetch it
+      if (!coords && fetchLocation) {
+        coords = await fetchLocation();
+      }
+
+      // Use location if available, otherwise use default Kathmandu coordinates
+      const lat = coords?.latitude || 27.6221;
+      const lon = coords?.longitude || 85.5428;
+
+      await fetchWeatherData(lat, lon);
+    };
+
+    initializeWeather();
+  }, [location]);
+
+  const handleRefresh = async () => {
+    // Try to get fresh location
+    let coords = location;
+    if (fetchLocation) {
+      const newCoords = await fetchLocation();
+      coords = newCoords || coords;
+    }
+
+    const lat = coords?.latitude || 27.6221;
+    const lon = coords?.longitude || 85.5428;
+
+    await fetchWeatherData(lat, lon);
+    Alert.alert(
+      "Refresh",
+      "Weather and telemetry details refreshed successfully."
+    );
+  };
+
+  if (loading || !weatherData || !forecastData) {
+    return (
+      <View
+        style={[
+          styles.container,
+          { backgroundColor: themeColors.bg, justifyContent: "center", alignItems: "center" },
+        ]}
+      >
+        <ActivityIndicator size="large" color={Colors.darkGreen} />
+        <ThemeText category="body" style={{ marginTop: 16 }}>
+          {locationLoading ? "Getting your location..." : "Loading weather data..."}
+        </ThemeText>
+      </View>
+    );
+  }
+
+  const currentWeather = weatherData.current;
+  const forecastDays = forecastData.forecast.forecastday;
+
+  // Calculate irrigation advisory based on forecast
+  const getRainProbability = () => {
+    if (forecastDays.length >= 2) {
+      return forecastDays[2]?.day?.daily_chance_of_rain || 0;
+    }
+    return 0;
+  };
+
+  const rainProbMonday = getRainProbability();
+  const shouldSkipIrrigation = rainProbMonday > 50;
 
   return (
     <View style={[styles.container, { backgroundColor: themeColors.bg }]}>
       {/* HEADER */}
       <View style={[styles.header, { borderBottomColor: themeColors.border }]}>
-        <TouchableOpacity onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={24} color={themeColors.text} />
-        </TouchableOpacity>
-        <View style={styles.headerTitleBox}>
-          <ThemeText category="h2">Soil Treatment Plan</ThemeText>
-          <ThemeText category="caption">Target: High-Yield Recovery</ThemeText>
+        <View>
+          <ThemeText category="h2">Weather & Smart Farm</ThemeText>
+          <ThemeText category="caption" style={{ marginTop: 4 }}>
+            {weatherData.location.name}, {weatherData.location.country}
+          </ThemeText>
         </View>
-        <TouchableOpacity
-          onPress={() =>
-            Alert.alert(
-              "Dose Info",
-              "Dosages are calculated from average crop depletion and the identified soil deficiency from computer vision.",
-            )
-          }
-        >
-          <Ionicons
-            name="calculator-outline"
-            size={24}
-            color={themeColors.text}
-          />
+        <TouchableOpacity style={styles.refreshBtn} onPress={handleRefresh}>
+          <Ionicons name="refresh" size={20} color={Colors.darkGreen} />
         </TouchableOpacity>
       </View>
 
@@ -140,229 +229,284 @@ export default function FertilizerScreen() {
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
       >
-        {/* ACREAGE INTERACTIVE CALCULATOR */}
-        <EarthyCard style={styles.calculatorCard}>
-          <ThemeText
-            category="caption"
-            style={{ color: "rgba(255,255,255,0.7)", fontWeight: "600" }}
-          >
-            STEP 1: ENTER YOUR FARM LAND SIZE
-          </ThemeText>
-
-          <View style={styles.stepperContainer}>
-            <TouchableOpacity
-              onPress={() => changeAcreage(-5)}
-              style={styles.stepBtn}
-            >
-              <Text style={styles.stepBtnText}>-5</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              onPress={() => changeAcreage(-1)}
-              style={styles.stepBtn}
-            >
-              <Text style={styles.stepBtnText}>-1</Text>
-            </TouchableOpacity>
-
-            <View style={styles.acreageDisplay}>
-              <Text style={styles.acreageValueText}>{acreage}</Text>
-              <Text style={styles.acreageUnitText}>Acres</Text>
-            </View>
-
-            <TouchableOpacity
-              onPress={() => changeAcreage(1)}
-              style={styles.stepBtn}
-            >
-              <Text style={styles.stepBtnText}>+1</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              onPress={() => changeAcreage(5)}
-              style={styles.stepBtn}
-            >
-              <Text style={styles.stepBtnText}>+5</Text>
-            </TouchableOpacity>
-          </View>
-
-          <ThemeText category="caption" style={styles.calcSub}>
-            Dosages below have adjusted automatically for {acreage} acres of
-            cropland.
-          </ThemeText>
-        </EarthyCard>
-
-        {/* DEFICIENCY TARGET BANNER */}
-        <View
-          style={[styles.targetBanner, { borderColor: themeColors.border }]}
-        >
-          <Ionicons name="warning-outline" size={18} color="#E65100" />
-          <ThemeText category="caption" style={styles.targetBannerText}>
-            Targeting deficiencies:{" "}
-            <ThemeText category="bodyBold" style={{ color: "#E65100" }}>
-              Phosphorus (-18%)
-            </ThemeText>{" "}
-            and{" "}
-            <ThemeText category="bodyBold" style={{ color: "#E65100" }}>
-              Nitrogen (-8%)
-            </ThemeText>
-          </ThemeText>
-        </View>
-
-        {/* ORGANIC TREATMENTS SECTION */}
-        <ThemeText category="h3" style={styles.sectionTitle}>
-          1. Organic Suggestions (Recommended)
-        </ThemeText>
-        {organicTreatments.map((treatment) => {
-          const totalDose = (treatment.baseDose * acreage).toFixed(1);
-          return (
-            <EarthyCard key={treatment.id} style={styles.doseCard}>
-              <View style={styles.doseCardHeader}>
-                <View style={styles.doseNameBlock}>
-                  <Ionicons
-                    name="leaf-outline"
-                    size={18}
-                    color={Colors.lightGreen}
-                  />
-                  <ThemeText category="h3" style={styles.treatmentName}>
-                    {treatment.name}
-                  </ThemeText>
-                </View>
-                <View style={styles.doseAmountBadge}>
-                  <Text style={styles.amountText}>
-                    {totalDose} {treatment.unit}
-                  </Text>
-                </View>
-              </View>
-              <ThemeText category="caption" style={styles.treatmentDesc}>
-                {treatment.desc}
-              </ThemeText>
-              <View style={styles.scheduleRow}>
-                <Ionicons
-                  name="calendar-outline"
-                  size={12}
-                  color={themeColors.subText}
-                />
-                <ThemeText category="caption" style={{ marginLeft: 4 }}>
-                  Schedule: {treatment.schedule}
+        {/* CURRENT WEATHER OVERVIEW */}
+        <EarthyCard style={styles.currentWeatherCard}>
+          <View style={styles.weatherSummaryRow}>
+            <View style={styles.mainTempBlock}>
+              <Text style={styles.currentTempText}>
+                {Math.round(currentWeather.temp_c)}°
+              </Text>
+              <View style={{ marginLeft: 8 }}>
+                <ThemeText category="h2" style={{ color: Colors.white }}>
+                  {currentWeather.condition.text}
+                </ThemeText>
+                <ThemeText
+                  category="caption"
+                  style={{ color: "rgba(255,255,255,0.7)" }}
+                >
+                  Feels like {Math.round(currentWeather.feelslike_c)}°C
+                  {location && (
+                    <> • 📍 {location.latitude.toFixed(4)}°, {location.longitude.toFixed(4)}°</>
+                  )}
                 </ThemeText>
               </View>
-            </EarthyCard>
-          );
-        })}
+            </View>
+            <Ionicons
+              name={getWeatherIcon(currentWeather.condition.code)}
+              size={64}
+              color={getWeatherIconColor(currentWeather.condition.code)}
+            />
+          </View>
 
-        {/* CHEMICAL TREATMENTS SECTION */}
+          <View style={styles.weatherMetricsDivider} />
+
+          <View style={styles.weatherMetricsGrid}>
+            <View style={styles.metricItem}>
+              <Ionicons name="water-outline" size={18} color={Colors.white} />
+              <View style={styles.metricTextGroup}>
+                <Text style={styles.metricVal}>{currentWeather.humidity}%</Text>
+                <Text style={styles.metricLbl}>Humidity</Text>
+              </View>
+            </View>
+
+            <View style={styles.metricItem}>
+              <Ionicons name="rainy-outline" size={18} color={Colors.white} />
+              <View style={styles.metricTextGroup}>
+                <Text style={styles.metricVal}>
+                  {currentWeather.precip_mm.toFixed(1)} mm
+                </Text>
+                <Text style={styles.metricLbl}>Precipitation</Text>
+              </View>
+            </View>
+
+            <View style={styles.metricItem}>
+              <Ionicons name="cloudy-outline" size={18} color={Colors.white} />
+              <View style={styles.metricTextGroup}>
+                <Text style={styles.metricVal}>
+                  {currentWeather.wind_dir} {Math.round(currentWeather.wind_mph)} mph
+                </Text>
+                <Text style={styles.metricLbl}>Wind Speed</Text>
+              </View>
+            </View>
+
+            <View style={styles.metricItem}>
+              <Ionicons name="sunny-outline" size={18} color={Colors.white} />
+              <View style={styles.metricTextGroup}>
+                <Text style={styles.metricVal}>
+                  {Math.round(currentWeather.uv)} ({getUVDescription(currentWeather.uv)})
+                </Text>
+                <Text style={styles.metricLbl}>Solar UV Index</Text>
+              </View>
+            </View>
+          </View>
+        </EarthyCard>
+
+        {/* 5-DAY PREDICTIVE FORECAST */}
         <ThemeText category="h3" style={styles.sectionTitle}>
-          2. Chemical Fertilizers (Fast Recovery)
+          5-Day Forecast
         </ThemeText>
-        {chemicalTreatments.map((treatment) => {
-          const totalDose = (treatment.baseDose * acreage).toFixed(0);
-          return (
-            <EarthyCard key={treatment.id} style={styles.doseCard}>
-              <View style={styles.doseCardHeader}>
-                <View style={styles.doseNameBlock}>
-                  <Ionicons name="flask-outline" size={18} color="#FF7043" />
-                  <ThemeText category="h3" style={styles.treatmentName}>
-                    {treatment.name}
-                  </ThemeText>
-                </View>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.forecastScroll}
+        >
+          {forecastDays.map((item, idx) => (
+            <EarthyCard key={idx} style={styles.forecastCard}>
+              <ThemeText category="bodyBold" style={styles.forecastDay}>
+                {getDayName(item.date, idx)}
+              </ThemeText>
+              <Ionicons
+                name={getWeatherIcon(item.day.condition.code)}
+                size={28}
+                color={getWeatherIconColor(item.day.condition.code)}
+                style={{ marginVertical: 8 }}
+              />
+              <ThemeText category="caption" style={{ fontWeight: "700" }}>
+                {Math.round(item.day.maxtemp_c)}° / {Math.round(item.day.mintemp_c)}°
+              </ThemeText>
+
+              <View style={styles.rainBadge}>
+                <Ionicons name="water" size={10} color="#42A5F5" />
+                <Text style={styles.rainBadgeText}>
+                  {item.day.daily_chance_of_rain}%
+                </Text>
+              </View>
+            </EarthyCard>
+          ))}
+        </ScrollView>
+
+        {/* SMART IRRIGATION ADVISORY */}
+        <ThemeText category="h3" style={styles.sectionTitle}>
+          Smart Irrigation Advisor
+        </ThemeText>
+        <EarthyCard style={styles.irrigationCard}>
+          <View style={styles.irrigationCardHeader}>
+            <View style={styles.irrigationIconBg}>
+              <Ionicons name="water" size={24} color={Colors.darkGreen} />
+            </View>
+            <View style={{ marginLeft: 12, flex: 1 }}>
+              <ThemeText category="h3">AI Water Optimizations</ThemeText>
+              <ThemeText category="caption">
+                Saving target: {shouldSkipIrrigation ? "15,000" : "8,000"} Gallons
+              </ThemeText>
+            </View>
+          </View>
+
+          <ThemeText category="body" style={styles.irrigationAdvisoryText}>
+            {shouldSkipIrrigation ? (
+              <>
+                "Rain probability rises to{" "}
+                <ThemeText category="bodyBold" style={{ color: Colors.darkGreen }}>
+                  {rainProbMonday}% on {getDayName(forecastDays[2]?.date, 2)}
+                </ThemeText>
+                . The advisor suggests skipping irrigation cycles to conserve water.
+                Monitor soil moisture levels and adjust as needed."
+              </>
+            ) : (
+              <>
+                "Weather conditions are stable with low rain probability (
+                <ThemeText category="bodyBold" style={{ color: Colors.darkGreen }}>
+                  {rainProbMonday}%
+                </ThemeText>
+                ). Maintain standard irrigation schedule. Monitor UV levels for
+                potential increased water needs."
+              </>
+            )}
+          </ThemeText>
+
+          <View style={styles.irrigationDetailsGrid}>
+            <View style={styles.irrigationDetailBox}>
+              <ThemeText category="caption">Status</ThemeText>
+              <ThemeText
+                category="bodyBold"
+                style={{ color: shouldSkipIrrigation ? "#E65100" : "#2E7D32" }}
+              >
+                {shouldSkipIrrigation ? "SKIP ADVISED" : "NORMAL"}
+              </ThemeText>
+            </View>
+            <View style={styles.irrigationDetailBox}>
+              <ThemeText category="caption">Humidity</ThemeText>
+              <ThemeText category="bodyBold">
+                {currentWeather.humidity}%
+              </ThemeText>
+            </View>
+            <View style={styles.irrigationDetailBox}>
+              <ThemeText category="caption">Precipitation</ThemeText>
+              <ThemeText category="bodyBold">
+                {currentWeather.precip_mm.toFixed(2)} mm
+              </ThemeText>
+            </View>
+          </View>
+        </EarthyCard>
+
+        {/* FARMING ALERTS */}
+        <ThemeText category="h3" style={styles.sectionTitle}>
+          Active Farming Alerts
+        </ThemeText>
+
+        {/* High Humidity Alert */}
+        {currentWeather.humidity > 70 && (
+          <EarthyCard style={styles.alertCard}>
+            <View style={styles.alertRow}>
+              <View
+                style={[
+                  styles.alertIconCircle,
+                  { backgroundColor: "#FF704320" },
+                ]}
+              >
+                <Ionicons name="bug" size={22} color="#FF7043" />
+              </View>
+              <View style={styles.alertTexts}>
+                <ThemeText category="bodyBold" style={{ color: "#FF7043" }}>
+                  Fungal Risk Warning
+                </ThemeText>
+                <ThemeText category="caption" style={styles.alertDesc}>
+                  Current humidity at {currentWeather.humidity}% creates favorable
+                  conditions for fungal growth. Consider applying organic fungicide
+                  protection to crop bases.
+                </ThemeText>
+              </View>
+            </View>
+          </EarthyCard>
+        )}
+
+        {/* UV Alert */}
+        {currentWeather.uv >= 8 && (
+          <EarthyCard style={styles.alertCard}>
+            <View style={styles.alertRow}>
+              <View
+                style={[
+                  styles.alertIconCircle,
+                  { backgroundColor: "#FFB30020" },
+                ]}
+              >
+                <Ionicons name="sunny" size={22} color="#FFB300" />
+              </View>
+              <View style={styles.alertTexts}>
+                <ThemeText category="bodyBold" style={{ color: "#E65100" }}>
+                  Extreme UV Advisory
+                </ThemeText>
+                <ThemeText category="caption" style={styles.alertDesc}>
+                  UV index at {Math.round(currentWeather.uv)} ({getUVDescription(currentWeather.uv)}).
+                  Move high-sensitivity seedlings under shade screens during peak hours
+                  (11:00 AM - 3:00 PM).
+                </ThemeText>
+              </View>
+            </View>
+          </EarthyCard>
+        )}
+
+        {/* Wind Alert */}
+        {currentWeather.wind_mph > 20 && (
+          <EarthyCard style={styles.alertCard}>
+            <View style={styles.alertRow}>
+              <View
+                style={[
+                  styles.alertIconCircle,
+                  { backgroundColor: "#42A5F520" },
+                ]}
+              >
+                <Ionicons name="cloudy" size={22} color="#42A5F5" />
+              </View>
+              <View style={styles.alertTexts}>
+                <ThemeText category="bodyBold" style={{ color: "#0277BD" }}>
+                  High Wind Alert
+                </ThemeText>
+                <ThemeText category="caption" style={styles.alertDesc}>
+                  Wind speeds at {Math.round(currentWeather.wind_mph)} mph from {currentWeather.wind_dir}.
+                  Secure loose structures and consider delaying spraying operations.
+                </ThemeText>
+              </View>
+            </View>
+          </EarthyCard>
+        )}
+
+        {/* No Alerts */}
+        {currentWeather.humidity <= 70 &&
+          currentWeather.uv < 8 &&
+          currentWeather.wind_mph <= 20 && (
+            <EarthyCard style={styles.alertCard}>
+              <View style={styles.alertRow}>
                 <View
                   style={[
-                    styles.doseAmountBadge,
-                    { backgroundColor: "#FF704320" },
+                    styles.alertIconCircle,
+                    { backgroundColor: "#4CAF5020" },
                   ]}
                 >
-                  <Text style={[styles.amountText, { color: "#FF7043" }]}>
-                    {totalDose} {treatment.unit}
-                  </Text>
+                  <Ionicons name="checkmark-circle" size={22} color="#4CAF50" />
                 </View>
-              </View>
-              <ThemeText category="caption" style={styles.treatmentDesc}>
-                {treatment.desc}
-              </ThemeText>
-              <View style={styles.scheduleRow}>
-                <Ionicons
-                  name="calendar-outline"
-                  size={12}
-                  color={themeColors.subText}
-                />
-                <ThemeText category="caption" style={{ marginLeft: 4 }}>
-                  Schedule: {treatment.schedule}
-                </ThemeText>
+                <View style={styles.alertTexts}>
+                  <ThemeText category="bodyBold" style={{ color: "#2E7D32" }}>
+                    No Active Alerts
+                  </ThemeText>
+                  <ThemeText category="caption" style={styles.alertDesc}>
+                    Weather conditions are favorable for normal farming operations.
+                    Continue with scheduled activities.
+                  </ThemeText>
+                </View>
               </View>
             </EarthyCard>
-          );
-        })}
-
-        {/* TIMELINE & RECOVERY SCHEDULE */}
-        <ThemeText category="h3" style={styles.sectionTitle}>
-          3. Weekly Treatment Schedule
-        </ThemeText>
-        <EarthyCard style={styles.timelineCard}>
-          {timelineSteps.map((step, index) => (
-            <View key={index} style={styles.timelineItem}>
-              <View style={styles.timelineLeft}>
-                <View style={styles.timelineDotCircle}>
-                  <View style={styles.timelineDotInner} />
-                </View>
-                {index < timelineSteps.length - 1 && (
-                  <View style={styles.timelineLine} />
-                )}
-              </View>
-
-              <View style={styles.timelineRight}>
-                <View style={styles.timelineHeaderRow}>
-                  <ThemeText
-                    category="bodyBold"
-                    style={{ color: Colors.darkGreen }}
-                  >
-                    {step.week}
-                  </ThemeText>
-                  <ThemeText category="h3">{step.title}</ThemeText>
-                </View>
-                <ThemeText category="caption" style={styles.timelineDescText}>
-                  {step.desc}
-                </ThemeText>
-              </View>
-            </View>
-          ))}
-        </EarthyCard>
-
-        {/* SOIL RECOVERY PLAN METADATA */}
-        <EarthyCard style={styles.summaryCard}>
-          <ThemeText
-            category="h3"
-            style={{ color: Colors.white, fontWeight: "800" }}
-          >
-            Soil Health Projection
-          </ThemeText>
-          <ThemeText
-            category="caption"
-            style={{ color: "rgba(255,255,255,0.75)", marginVertical: 6 }}
-          >
-            Estimated recovery timeline and health improvement forecasts:
-          </ThemeText>
-          <View style={styles.statRow}>
-            <View style={styles.statItem}>
-              <Text style={styles.statNumber}>45 Days</Text>
-              <Text style={styles.statLabel}>Full Recovery</Text>
-            </View>
-            <View style={styles.statItem}>
-              <Text style={styles.statNumber}>+18%</Text>
-              <Text style={styles.statLabel}>Health Score</Text>
-            </View>
-            <View style={styles.statItem}>
-              <Text style={styles.statNumber}>$40/Acre</Text>
-              <Text style={styles.statLabel}>Est. Treatment Cost</Text>
-            </View>
-          </View>
-        </EarthyCard>
-
-        <EarthyButton
-          title="Return to Diagnosis"
-          variant="outline"
-          icon="chevron-back"
-          onPress={() => router.back()}
-          style={{ marginTop: 12, marginBottom: 20 }}
-        />
+          )}
       </ScrollView>
     </View>
   );
@@ -381,183 +525,157 @@ const styles = StyleSheet.create({
     paddingBottom: 16,
     borderBottomWidth: 1,
   },
-  headerTitleBox: {
-    alignItems: "center",
+  refreshBtn: {
+    padding: 6,
   },
   scrollContent: {
     paddingHorizontal: 24,
     paddingTop: 16,
     paddingBottom: 40,
   },
-  calculatorCard: {
+  currentWeatherCard: {
     backgroundColor: Colors.darkGreen,
     borderRadius: 24,
     padding: 20,
     marginBottom: 16,
   },
-  stepperContainer: {
+  weatherSummaryRow: {
     flexDirection: "row",
-    alignItems: "center",
     justifyContent: "space-between",
-    marginVertical: 16,
-  },
-  stepBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: "rgba(255,255,255,0.15)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  stepBtnText: {
-    fontSize: 14,
-    fontWeight: "700",
-    color: Colors.white,
-  },
-  acreageDisplay: {
     alignItems: "center",
   },
-  acreageValueText: {
-    fontSize: 36,
-    fontWeight: "900",
-    color: Colors.accentYellow,
-  },
-  acreageUnitText: {
-    fontSize: 12,
-    fontWeight: "700",
-    color: Colors.white,
-    marginTop: -4,
-  },
-  calcSub: {
-    color: "rgba(255, 255, 255, 0.7)",
-    textAlign: "center",
-  },
-  targetBanner: {
+  mainTempBlock: {
     flexDirection: "row",
     alignItems: "center",
-    padding: 12,
-    borderRadius: 12,
-    borderWidth: 1,
-    backgroundColor: "#FFF3E0",
-    marginBottom: 16,
   },
-  targetBannerText: {
+  currentTempText: {
+    fontSize: 56,
+    fontWeight: "900",
+    color: Colors.white,
+  },
+  weatherMetricsDivider: {
+    height: 1,
+    backgroundColor: "rgba(255,255,255,0.15)",
+    marginVertical: 18,
+  },
+  weatherMetricsGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "space-between",
+  },
+  metricItem: {
+    width: "48%",
+    flexDirection: "row",
+    alignItems: "center",
+    marginVertical: 6,
+  },
+  metricTextGroup: {
     marginLeft: 8,
-    color: "#E65100",
+  },
+  metricVal: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: Colors.white,
+  },
+  metricLbl: {
+    fontSize: 9,
+    color: "rgba(255,255,255,0.6)",
   },
   sectionTitle: {
     fontWeight: "800",
     marginVertical: 12,
   },
-  doseCard: {
+  forecastScroll: {
+    paddingVertical: 8,
+    paddingRight: 24,
+    marginBottom: 16,
+  },
+  forecastCard: {
+    width: 100,
+    alignItems: "center",
+    padding: 12,
+    marginRight: 10,
     borderRadius: 16,
-    padding: 14,
-    marginVertical: 4,
   },
-  doseCardHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 6,
+  forecastDay: {
+    fontSize: 12,
   },
-  doseNameBlock: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  treatmentName: {
-    fontSize: 15,
-    fontWeight: "800",
-    marginLeft: 8,
-  },
-  doseAmountBadge: {
-    backgroundColor: Colors.lightGreen + "20",
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 10,
-  },
-  amountText: {
-    fontSize: 11,
-    fontWeight: "800",
-    color: Colors.darkGreen,
-  },
-  treatmentDesc: {
-    lineHeight: 18,
-  },
-  scheduleRow: {
+  rainBadge: {
     flexDirection: "row",
     alignItems: "center",
     marginTop: 8,
+    backgroundColor: "#E1F5FE",
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 8,
   },
-  timelineCard: {
+  rainBadgeText: {
+    fontSize: 8,
+    fontWeight: "700",
+    color: "#0288D1",
+    marginLeft: 2,
+  },
+  irrigationCard: {
+    padding: 16,
     borderRadius: 20,
-    padding: 18,
     marginBottom: 16,
+    backgroundColor: Colors.lightGreen + "12",
+    borderWidth: 1,
+    borderColor: Colors.lightGreen + "35",
   },
-  timelineItem: {
+  irrigationCardHeader: {
     flexDirection: "row",
-    minHeight: 70,
-  },
-  timelineLeft: {
-    width: 24,
     alignItems: "center",
+    marginBottom: 10,
   },
-  timelineDotCircle: {
-    width: 14,
-    height: 14,
-    borderRadius: 7,
-    backgroundColor: Colors.lightGreen + "30",
+  irrigationIconBg: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: Colors.lightGreen + "20",
     alignItems: "center",
     justifyContent: "center",
-    marginTop: 4,
   },
-  timelineDotInner: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: Colors.darkGreen,
+  irrigationAdvisoryText: {
+    fontStyle: "italic",
+    lineHeight: 18,
+    color: Colors.darkGreen,
+    fontSize: 13,
   },
-  timelineLine: {
-    flex: 1,
-    width: 2,
-    backgroundColor: Colors.lightGray,
-    marginVertical: 4,
-  },
-  timelineRight: {
-    flex: 1,
-    marginLeft: 12,
-    paddingBottom: 16,
-  },
-  timelineHeaderRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 4,
-  },
-  timelineDescText: {
-    lineHeight: 16,
-  },
-  summaryCard: {
-    backgroundColor: Colors.brown,
-    borderRadius: 20,
-    padding: 16,
-    marginBottom: 16,
-  },
-  statRow: {
+  irrigationDetailsGrid: {
     flexDirection: "row",
     justifyContent: "space-between",
     marginTop: 14,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: Colors.lightGreen + "30",
   },
-  statItem: {
+  irrigationDetailBox: {
     flex: 1,
     alignItems: "center",
   },
-  statNumber: {
-    fontSize: 18,
-    fontWeight: "900",
-    color: Colors.accentYellow,
+  alertCard: {
+    padding: 14,
+    borderRadius: 16,
+    marginVertical: 4,
   },
-  statLabel: {
-    fontSize: 9,
-    color: Colors.white,
-    marginTop: 2,
+  alertRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+  },
+  alertIconCircle: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  alertTexts: {
+    flex: 1,
+    marginLeft: 12,
+  },
+  alertDesc: {
+    marginTop: 4,
+    lineHeight: 16,
   },
 });
