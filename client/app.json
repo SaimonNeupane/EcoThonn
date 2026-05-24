@@ -9,7 +9,13 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSCameraUsageDescription": "SoilSense AI needs camera access to scan your soil samples.",
+        "NSMicrophoneUsageDescription": "SoilSense AI needs microphone access for video recording.",
+        "NSPhotoLibraryUsageDescription": "SoilSense AI needs photo library access to import soil images.",
+        "NSPhotoLibraryAddUsageDescription": "SoilSense AI needs permission to save scanned soil images."
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -27,6 +33,20 @@
     },
     "plugins": [
       "expo-router",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "SoilSense AI needs camera access to scan your soil samples.",
+          "microphonePermission": "SoilSense AI needs microphone access for video capture.",
+          "recordAudioAndroid": false
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "SoilSense AI needs photo library access to import soil images."
+        }
+      ],
       [
         "expo-splash-screen",
         {

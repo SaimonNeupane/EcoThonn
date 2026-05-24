@@ -8,6 +8,7 @@ import {
   Animated,
   ViewStyle,
   TextStyle,
+  StyleProp,
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
@@ -65,7 +66,7 @@ export function useThemeColors() {
 // 2. Typography Hierarchy
 export const ThemeText: React.FC<{
   category?: "h1" | "h2" | "h3" | "body" | "bodyBold" | "label" | "caption";
-  style?: TextStyle | TextStyle[];
+  style?: StyleProp<TextStyle>;
   children: React.ReactNode;
   numberOfLines?: number;
 }> = ({ category = "body", style, children, numberOfLines }) => {
@@ -119,7 +120,7 @@ export const ThemeText: React.FC<{
 
 // 3. EarthyGradient
 export const EarthyGradient: React.FC<{
-  style?: ViewStyle;
+  style?: StyleProp<ViewStyle>;
   children: React.ReactNode;
   variant?: "primary" | "light" | "earth" | "radialSim";
 }> = ({ style, children, variant = "primary" }) => {
@@ -153,7 +154,7 @@ export const EarthyGradient: React.FC<{
 
 // 4. EarthyCard
 export const EarthyCard: React.FC<{
-  style?: ViewStyle | ViewStyle[];
+  style?: StyleProp<ViewStyle>;
   children: React.ReactNode;
   onPress?: () => void;
   bordered?: boolean;
@@ -192,7 +193,7 @@ export const EarthyButton: React.FC<{
   onPress: () => void;
   variant?: "primary" | "secondary" | "outline" | "accent";
   icon?: string;
-  style?: ViewStyle;
+  style?: StyleProp<ViewStyle>;
   disabled?: boolean;
 }> = ({ title, onPress, variant = "primary", icon, style, disabled }) => {
   const colors = useThemeColors();
@@ -270,7 +271,7 @@ export const EarthyInput: React.FC<{
   onChangeText: (text: string) => void;
   secureTextEntry?: boolean;
   icon?: string;
-  style?: ViewStyle;
+  style?: StyleProp<ViewStyle>;
   keyboardType?: "default" | "email-address" | "numeric";
 }> = ({
   label,
@@ -327,7 +328,7 @@ export const HealthScoreGauge: React.FC<{
   score: number;
   size?: number;
   strokeWidth?: number;
-  style?: ViewStyle;
+  style?: StyleProp<ViewStyle>;
 }> = ({ score, size = 120, strokeWidth = 10, style }) => {
   const colors = useThemeColors();
 
@@ -397,7 +398,7 @@ export const NPKChart: React.FC<{
   n: number; // 0 to 100
   p: number;
   k: number;
-  style?: ViewStyle;
+  style?: StyleProp<ViewStyle>;
 }> = ({ n, p, k, style }) => {
   const colors = useThemeColors();
 
@@ -460,7 +461,7 @@ export const SkeletonItem: React.FC<{
   width?: any;
   height?: number;
   borderRadius?: number;
-  style?: ViewStyle;
+  style?: StyleProp<ViewStyle>;
 }> = ({ width = "100%", height = 15, borderRadius = 4, style }) => {
   const colors = useThemeColors();
   const animatedValue = useRef(new Animated.Value(0.3)).current;
@@ -501,7 +502,7 @@ export const SkeletonItem: React.FC<{
 // 10. AI Loading Pulse animation
 export const AILoadingAnimation: React.FC<{
   size?: number;
-  style?: ViewStyle;
+  style?: StyleProp<ViewStyle>;
 }> = ({ size = 60, style }) => {
   const scaleValue = useRef(new Animated.Value(1)).current;
   const opacityValue = useRef(new Animated.Value(0.6)).current;
