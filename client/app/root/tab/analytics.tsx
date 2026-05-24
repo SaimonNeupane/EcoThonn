@@ -18,7 +18,6 @@ import { Ionicons } from "@expo/vector-icons";
 type TimeframeType = "7D" | "30D" | "6M";
 
 export default function AnalyticsScreen() {
-  // const router = useRouter();
   const themeColors = useThemeColors();
   const [timeframe, setTimeframe] = useState<TimeframeType>("30D");
 
@@ -54,40 +53,18 @@ export default function AnalyticsScreen() {
     },
   ];
 
-  // Mock graph coordinates based on timeframe
-  const getGraphData = () => {
-    switch (timeframe) {
-      case "7D":
-        return [
-          { label: "Mon", score: 80, ph: 6.4 },
-          { label: "Tue", score: 81, ph: 6.4 },
-          { label: "Wed", score: 81, ph: 6.4 },
-          { label: "Thu", score: 83, ph: 6.5 },
-          { label: "Fri", score: 84, ph: 6.5 },
-          { label: "Sat", score: 85, ph: 6.5 },
-          { label: "Sun", score: 85, ph: 6.5 },
-        ];
-      case "6M":
-        return [
-          { label: "Dec", score: 62, ph: 5.7 },
-          { label: "Jan", score: 65, ph: 5.9 },
-          { label: "Feb", score: 68, ph: 6.0 },
-          { label: "Mar", score: 72, ph: 6.2 },
-          { label: "Apr", score: 80, ph: 6.4 },
-          { label: "May", score: 85, ph: 6.5 },
-        ];
-      case "30D":
-      default:
-        return [
-          { label: "Wk 1", score: 68, ph: 6.0 },
-          { label: "Wk 2", score: 72, ph: 6.1 },
-          { label: "Wk 3", score: 80, ph: 6.4 },
-          { label: "Wk 4", score: 85, ph: 6.5 },
-        ];
-    }
-  };
+  // NPK data per sector
+  const npkData = [
+    { sector: "North A", N: 78, P: 55, K: 88 },
+    { sector: "East B", N: 52, P: 70, K: 60 },
+    { sector: "Orch C", N: 34, P: 42, K: 38 },
+  ];
 
-  const currentGraphPoints = getGraphData();
+  const NPK_COLORS = {
+    N: "#4CAF7D",
+    P: "#F5A623",
+    K: "#5B8DEF",
+  };
 
   const handleExportAll = () => {
     Alert.alert("Export Data", "Format for export:", [
@@ -105,37 +82,71 @@ export default function AnalyticsScreen() {
     ]);
   };
 
-  // Custom visual representation of a historical line/bar graph
-  const renderTrendChart = () => {
+  // NPK grouped bar chart
+  const renderNPKChart = () => {
     const maxVal = 100;
     return (
-      <View style={styles.chartOuter}>
-        <View style={styles.chartYAxis}>
-          <ThemeText category="caption">100%</ThemeText>
-          <ThemeText category="caption">75%</ThemeText>
-          <ThemeText category="caption">50%</ThemeText>
-          <ThemeText category="caption">25%</ThemeText>
-          <ThemeText category="caption">0%</ThemeText>
+      <View>
+        {/* Legend */}
+        <View style={styles.npkLegend}>
+          {(["N", "P", "K"] as const).map((key) => (
+            <View key={key} style={styles.npkLegendItem}>
+              <View
+                style={[
+                  styles.npkLegendDot,
+                  { backgroundColor: NPK_COLORS[key] },
+                ]}
+              />
+              <Text
+                style={[styles.npkLegendLabel, { color: themeColors.text }]}
+              >
+                {key === "N"
+                  ? "Nitrogen"
+                  : key === "P"
+                    ? "Phosphorus"
+                    : "Potassium"}
+              </Text>
+            </View>
+          ))}
         </View>
 
-        <View style={styles.chartBarsGrid}>
-          {currentGraphPoints.map((pt, i) => {
-            const fillHeightPercent = (pt.score / maxVal) * 100;
-            return (
-              <View key={i} style={styles.chartColumn}>
-                <View style={styles.columnBarTrack}>
-                  {/* High tech bar filler */}
-                  <View
-                    style={[
-                      styles.columnBarFill,
-                      { height: `${fillHeightPercent}%` as any },
-                    ]}
-                  />
-                </View>
-                <Text style={styles.columnLabel}>{pt.label}</Text>
+        {/* Chart */}
+        <View style={styles.npkChartOuter}>
+          <View style={styles.npkYAxis}>
+            {["100", "75", "50", "25", "0"].map((v) => (
+              <ThemeText key={v} category="caption" style={styles.npkYLabel}>
+                {v}
+              </ThemeText>
+            ))}
+          </View>
+
+          <View style={styles.npkBarsArea}>
+            {npkData.map((sector, i) => (
+              <View key={i} style={styles.npkSectorGroup}>
+                {(["N", "P", "K"] as const).map((key) => {
+                  const pct = (sector[key] / maxVal) * 100;
+                  return (
+                    <View key={key} style={styles.npkBarTrack}>
+                      <View
+                        style={[
+                          styles.npkBarFill,
+                          {
+                            height: `${pct}%` as any,
+                            backgroundColor: NPK_COLORS[key],
+                          },
+                        ]}
+                      />
+                    </View>
+                  );
+                })}
+                <Text
+                  style={[styles.npkSectorLabel, { color: themeColors.text }]}
+                >
+                  {sector.sector}
+                </Text>
               </View>
-            );
-          })}
+            ))}
+          </View>
         </View>
       </View>
     );
@@ -202,48 +213,72 @@ export default function AnalyticsScreen() {
           ))}
         </View>
 
-        {/* SMART TREND INSIGHT CARD */}
+        {/* SMART TREND INSIGHT CARD — improved */}
         <EarthyCard style={styles.trendAdvisoryCard}>
-          <View style={styles.trendAdvisoryTitle}>
-            <Ionicons name="stats-chart" size={18} color={Colors.darkGreen} />
-            <ThemeText
-              category="bodyBold"
-              style={{ marginLeft: 8, color: Colors.darkGreen }}
-            >
-              Soil Improvement Trends
+          {/* Top accent bar */}
+          <View style={styles.trendAccentBar} />
+          <View style={styles.trendAdvisoryInner}>
+            <View style={styles.trendAdvisoryTitle}>
+              <View style={styles.trendIconCircle}>
+                <Ionicons
+                  name="trending-up"
+                  size={16}
+                  color={Colors.darkGreen}
+                />
+              </View>
+              <ThemeText
+                category="bodyBold"
+                style={{
+                  marginLeft: 10,
+                  color: Colors.darkGreen,
+                  fontSize: 14,
+                }}
+              >
+                Soil Improvement Trends
+              </ThemeText>
+            </View>
+
+            <ThemeText category="body" style={styles.trendAdvisoryText}>
+              Soil health scores show an upward trajectory of{" "}
+              <ThemeText
+                category="bodyBold"
+                style={{ color: Colors.darkGreen }}
+              >
+                +8.4% since March
+              </ThemeText>{" "}
+              due to active organic treatments in Sector A. pH has stabilized
+              within the ideal 6.4–6.5 range.
             </ThemeText>
+
+            {/* Stat pills */}
+            <View style={styles.trendStatRow}>
+              <View style={styles.trendStatPill}>
+                <Text style={styles.trendStatValue}>+8.4%</Text>
+                <Text style={styles.trendStatLabel}>Health ↑</Text>
+              </View>
+              <View style={styles.trendStatPill}>
+                <Text style={styles.trendStatValue}>6.5</Text>
+                <Text style={styles.trendStatLabel}>pH Stable</Text>
+              </View>
+              <View style={styles.trendStatPill}>
+                <Text style={styles.trendStatValue}>Sector A</Text>
+                <Text style={styles.trendStatLabel}>Top Zone</Text>
+              </View>
+            </View>
           </View>
-          <ThemeText category="body" style={styles.trendAdvisoryText}>
-            Soil health scores show an upward trajectory of{" "}
-            <ThemeText category="bodyBold" style={{ color: Colors.darkGreen }}>
-              +8.4% since March
-            </ThemeText>{" "}
-            due to active organic treatments in Sector A. pH has stabilized
-            within the ideal 6.4 - 6.5 range.
-          </ThemeText>
         </EarthyCard>
 
-        {/* HISTORICAL GRAPH CARD */}
+        {/* NPK GRAPH CARD */}
         <EarthyCard style={styles.graphCard}>
           <View style={styles.graphCardHeader}>
             <View>
-              <ThemeText category="h3">Soil Health Score Progress</ThemeText>
+              <ThemeText category="h3">NPK Nutrient Levels</ThemeText>
               <ThemeText category="caption">
-                Average performance value over time
+                Per-sector macronutrient breakdown
               </ThemeText>
             </View>
-            <View style={styles.legendDotContainer}>
-              <View
-                style={[
-                  styles.legendDot,
-                  { backgroundColor: Colors.darkGreen },
-                ]}
-              />
-              <ThemeText category="caption">Health Score</ThemeText>
-            </View>
           </View>
-
-          {renderTrendChart()}
+          {renderNPKChart()}
         </EarthyCard>
 
         {/* COMPARISON METRICS SECTION */}
@@ -471,24 +506,77 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "700",
   },
+
+  // ── Trend Advisory Card (improved) ──────────────────────────────────────────
   trendAdvisoryCard: {
-    backgroundColor: Colors.lightGreen + "12",
-    borderWidth: 1,
-    borderColor: Colors.lightGreen + "30",
-    padding: 14,
-    borderRadius: 16,
+    overflow: "hidden",
+    borderRadius: 18,
     marginBottom: 16,
+    padding: 0,
+    borderWidth: 1,
+    borderColor: Colors.lightGreen + "40",
+    backgroundColor: Colors.lightGreen + "0D",
+  },
+  trendAccentBar: {
+    height: 4,
+    width: "100%",
+    backgroundColor: Colors.darkGreen,
+    borderTopLeftRadius: 18,
+    borderTopRightRadius: 18,
+  },
+  trendAdvisoryInner: {
+    padding: 14,
   },
   trendAdvisoryTitle: {
     flexDirection: "row",
     alignItems: "center",
-    marginBottom: 6,
+    marginBottom: 8,
+  },
+  trendIconCircle: {
+    width: 30,
+    height: 30,
+    borderRadius: 10,
+    backgroundColor: Colors.lightGreen + "25",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: Colors.lightGreen + "40",
   },
   trendAdvisoryText: {
     color: Colors.darkGreen,
-    lineHeight: 18,
+    lineHeight: 20,
     fontSize: 13,
+    opacity: 0.85,
+    marginBottom: 12,
   },
+  trendStatRow: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  trendStatPill: {
+    flex: 1,
+    backgroundColor: Colors.darkGreen + "12",
+    borderRadius: 10,
+    paddingVertical: 7,
+    paddingHorizontal: 6,
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: Colors.darkGreen + "20",
+  },
+  trendStatValue: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: Colors.darkGreen,
+  },
+  trendStatLabel: {
+    fontSize: 9,
+    color: Colors.darkGreen,
+    opacity: 0.65,
+    marginTop: 2,
+    fontWeight: "600",
+  },
+
+  // ── Graph / NPK Card ─────────────────────────────────────────────────────────
   graphCard: {
     borderRadius: 20,
     padding: 16,
@@ -500,29 +588,48 @@ const styles = StyleSheet.create({
     alignItems: "flex-start",
     marginBottom: 16,
   },
-  legendDotContainer: {
+
+  // NPK Legend
+  npkLegend: {
+    flexDirection: "row",
+    justifyContent: "center",
+    gap: 16,
+    marginBottom: 12,
+  },
+  npkLegendItem: {
     flexDirection: "row",
     alignItems: "center",
+    gap: 5,
   },
-  legendDot: {
+  npkLegendDot: {
     width: 8,
     height: 8,
-    borderRadius: 4,
-    marginRight: 6,
+    borderRadius: 2,
   },
-  chartOuter: {
+  npkLegendLabel: {
+    fontSize: 10,
+    fontWeight: "600",
+  },
+
+  // NPK Chart
+  npkChartOuter: {
     flexDirection: "row",
     height: 180,
     alignItems: "stretch",
     paddingTop: 10,
   },
-  chartYAxis: {
-    width: 36,
+  npkYAxis: {
+    width: 30,
     justifyContent: "space-between",
-    alignItems: "flex-start",
-    paddingBottom: 20,
+    alignItems: "flex-end",
+    paddingBottom: 22,
+    paddingRight: 4,
   },
-  chartBarsGrid: {
+  npkYLabel: {
+    fontSize: 9,
+    opacity: 0.6,
+  },
+  npkBarsArea: {
     flex: 1,
     flexDirection: "row",
     justifyContent: "space-around",
@@ -531,31 +638,38 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderColor: Colors.lightGray,
     paddingBottom: 4,
+    paddingHorizontal: 4,
   },
-  chartColumn: {
-    alignItems: "center",
-    width: "12%",
+  npkSectorGroup: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    gap: 3,
+    height: "100%",
+    paddingBottom: 18,
+  },
+  npkBarTrack: {
+    width: 10,
     height: "100%",
     justifyContent: "flex-end",
-  },
-  columnBarTrack: {
-    flex: 1,
-    width: 8,
-    justifyContent: "flex-end",
-    backgroundColor: Colors.lightGray,
+    backgroundColor: Colors.lightGray + "80",
     borderRadius: 4,
-    marginBottom: 4,
   },
-  columnBarFill: {
+  npkBarFill: {
     width: "100%",
-    backgroundColor: Colors.darkGreen,
     borderRadius: 4,
   },
-  columnLabel: {
-    fontSize: 9,
+  npkSectorLabel: {
+    position: "absolute",
+    bottom: 0,
+    left: -4,
+    right: -4,
+    textAlign: "center",
+    fontSize: 8,
     fontWeight: "700",
-    color: Colors.textSecondary,
+    opacity: 0.6,
   },
+
+  // ── Performance Matrix ───────────────────────────────────────────────────────
   sectionTitle: {
     fontWeight: "800",
     marginVertical: 12,
@@ -593,6 +707,8 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: "flex-end",
   },
+
+  // ── Reports ──────────────────────────────────────────────────────────────────
   reportsHeaderRow: {
     flexDirection: "row",
     justifyContent: "space-between",

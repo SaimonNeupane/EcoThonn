@@ -6,6 +6,7 @@ import {
   TouchableOpacity,
   Alert,
   Text,
+  Dimensions,
 } from "react-native";
 import { useRouter } from "expo-router";
 import {
@@ -16,6 +17,8 @@ import {
   useThemeColors,
 } from "../components/DesignSystem";
 import { Ionicons } from "@expo/vector-icons";
+
+const { width } = Dimensions.get("window");
 
 type SeasonType = "Summer" | "Winter" | "Monsoon" | "Spring";
 
@@ -40,7 +43,6 @@ export default function CropsScreen() {
 
   const seasonsList: SeasonType[] = ["Summer", "Winter", "Monsoon", "Spring"];
 
-  // Database of recommended crops
   const cropsData: CropItem[] = [
     // Summer
     {
@@ -159,7 +161,7 @@ export default function CropsScreen() {
       waterNeed: "High",
       duration: "140 Days",
       profitability: "High",
-      desc: "High market value. Demands rich nitrogen levels and regular pest monitor.",
+      desc: "High market value. Demands rich nitrogen levels and regular pest monitoring.",
       iconName: "shirt",
       iconColor: "#B0BEC5",
     },
@@ -169,7 +171,6 @@ export default function CropsScreen() {
     (crop) => crop.season === selectedSeason,
   );
 
-  // Custom AI summary statement depending on selected season
   const getAiSummary = () => {
     switch (selectedSeason) {
       case "Winter":
@@ -187,93 +188,107 @@ export default function CropsScreen() {
   const getWaterColor = (need: string) => {
     if (need === "Low") return "#81C784";
     if (need === "Medium") return "#42A5F5";
+    if (need === "High") return "#FF8A65";
+    return "#E57373";
+  };
+
+  const getProfitColor = (p: string) => {
+    if (p === "High") return Colors.lightGreen;
+    if (p === "Medium") return Colors.accentYellow;
     return "#E57373";
   };
 
   return (
     <View style={[styles.container, { backgroundColor: themeColors.bg }]}>
-      {/* HEADER */}
+      {/* ── HEADER ── */}
       <View style={[styles.header, { borderBottomColor: themeColors.border }]}>
-        <TouchableOpacity onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={24} color={themeColors.text} />
+        <TouchableOpacity style={styles.headerIconBtn} onPress={() => router.back()}>
+          <Ionicons name="arrow-back" size={22} color={themeColors.text} />
         </TouchableOpacity>
+
         <View style={styles.headerTitleBox}>
-          <ThemeText category="h2">Crop Recommendations</ThemeText>
-          <ThemeText category="caption">Based on Sandy Loam analysis</ThemeText>
+          <ThemeText category="h2" style={styles.headerTitle}>
+            Crop Recommendations
+          </ThemeText>
+          <ThemeText category="caption" style={styles.headerSubtitle}>
+            Based on Sandy Loam analysis
+          </ThemeText>
         </View>
+
         <TouchableOpacity
+          style={styles.headerIconBtn}
           onPress={() =>
             Alert.alert(
-              "Tips",
-              "Suitability is calculated based on soil NPK levels, moisture capacity, current regional weather, and average market pricing.",
+              "How it works",
+              "Suitability is calculated based on soil NPK levels, moisture capacity, regional weather, and average market pricing.",
             )
           }
         >
           <Ionicons
             name="information-circle-outline"
-            size={24}
+            size={22}
             color={themeColors.text}
           />
         </TouchableOpacity>
       </View>
 
-      {/* SEASON SELECTOR BAR */}
-      <View
-        style={[styles.seasonTabs, { borderBottomColor: themeColors.border }]}
-      >
+      {/* ── SEASON SELECTOR ── */}
+      <View style={[styles.seasonBar, { borderBottomColor: themeColors.border }]}>
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.tabsScrollContent}
+          contentContainerStyle={styles.seasonScrollContent}
         >
-          {seasonsList.map((season) => (
-            <TouchableOpacity
-              key={season}
-              onPress={() => setSelectedSeason(season)}
-              style={[
-                styles.tabBtn,
-                selectedSeason === season
-                  ? { backgroundColor: Colors.darkGreen }
-                  : {
-                      backgroundColor: themeColors.card,
-                      borderColor: themeColors.border,
-                      borderWidth: 1,
-                    },
-              ]}
-            >
-              <Text
+          {seasonsList.map((season) => {
+            const isActive = selectedSeason === season;
+            return (
+              <TouchableOpacity
+                key={season}
+                onPress={() => setSelectedSeason(season)}
                 style={[
-                  styles.tabText,
-                  selectedSeason === season
-                    ? { color: Colors.white }
-                    : { color: themeColors.text },
+                  styles.seasonTab,
+                  isActive
+                    ? styles.seasonTabActive
+                    : {
+                        backgroundColor: themeColors.card,
+                        borderColor: themeColors.border,
+                        borderWidth: 1,
+                      },
                 ]}
               >
-                {season}
-              </Text>
-            </TouchableOpacity>
-          ))}
+                <Text
+                  style={[
+                    styles.seasonTabText,
+                    { color: isActive ? Colors.white : themeColors.text },
+                  ]}
+                >
+                  {season}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
         </ScrollView>
       </View>
 
+      {/* ── MAIN SCROLL ── */}
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
       >
-        {/* SMART AI INSIGHTS CARD */}
+        {/* AI Advisory card */}
         <EarthyCard style={styles.aiCard}>
           <View style={styles.aiTitleRow}>
-            <Ionicons name="sparkles" size={18} color={Colors.darkGreen} />
-            <ThemeText category="bodyBold" style={styles.aiTitle}>
-              SoilSense AI Advisory • {selectedSeason}
+            <Ionicons name="sparkles" size={16} color={Colors.darkGreen} />
+            <ThemeText category="bodyBold" style={styles.aiTitle} numberOfLines={1}>
+              SoilSense AI • {selectedSeason} Advisory
             </ThemeText>
           </View>
           <ThemeText category="caption" style={styles.aiText}>
-            “{getAiSummary()}”
+            &ldquo;{getAiSummary()}&rdquo;
           </ThemeText>
         </EarthyCard>
 
-        {/* LIST OF RECOMMENDED CROPS */}
+        {/* Section heading */}
         <ThemeText category="h3" style={styles.sectionTitle}>
           Suitable Varieties
         </ThemeText>
@@ -285,109 +300,139 @@ export default function CropsScreen() {
               size={48}
               color={themeColors.subText}
             />
-            <ThemeText category="body" style={{ marginTop: 8 }}>
+            <ThemeText category="body" style={{ marginTop: 8, textAlign: "center" }}>
               No matches found for {selectedSeason}.
             </ThemeText>
           </View>
         ) : (
           filteredCrops.map((crop) => (
             <EarthyCard key={crop.id} style={styles.cropCard}>
-              {/* Card top row */}
-              <View style={styles.cropCardHeader}>
-                <View style={styles.cropInfoLeft}>
+
+              {/* ── TOP: icon + match badge in its own row ── */}
+              <View style={styles.cropTopRow}>
+                {/* Icon + name */}
+                <View style={styles.cropIconAndName}>
                   <View
                     style={[
                       styles.cropIconBg,
-                      { backgroundColor: crop.iconColor + "15" },
+                      { backgroundColor: crop.iconColor + "18" },
                     ]}
                   >
                     <Ionicons
                       name={crop.iconName as any}
-                      size={24}
+                      size={22}
                       color={crop.iconColor}
                     />
                   </View>
-                  <View style={{ marginLeft: 12 }}>
-                    <ThemeText category="h2" style={styles.cropName}>
-                      {crop.name}
-                    </ThemeText>
-                    <ThemeText category="caption">{crop.desc}</ThemeText>
-                  </View>
+                  <ThemeText category="h2" style={styles.cropName}>
+                    {crop.name}
+                  </ThemeText>
                 </View>
 
-                {/* Match percentage gauge badge */}
-                <View style={styles.suitBadgeOuter}>
+                {/* Match badge */}
+                <View style={styles.suitBadge}>
                   <Text style={styles.suitBadgeVal}>{crop.suitability}%</Text>
                   <Text style={styles.suitBadgeLabel}>Match</Text>
                 </View>
               </View>
 
-              <View style={styles.divider} />
+              {/* ── Description (full width, no overlap) ── */}
+              <ThemeText
+                category="caption"
+                style={[styles.cropDesc, { color: themeColors.subText }]}
+              >
+                {crop.desc}
+              </ThemeText>
 
-              {/* Data Indicators Grid */}
+              {/* ── Divider ── */}
+              <View
+                style={[styles.divider, { backgroundColor: themeColors.border }]}
+              />
+
+              {/* ── Metrics grid (2 columns) ── */}
               <View style={styles.metricsGrid}>
+                {/* Yield */}
                 <View style={styles.metricItem}>
-                  <Ionicons
-                    name="trending-up-outline"
-                    size={16}
-                    color={themeColors.subText}
-                  />
+                  <View style={styles.metricIconWrap}>
+                    <Ionicons
+                      name="trending-up-outline"
+                      size={15}
+                      color={Colors.lightGreen}
+                    />
+                  </View>
                   <View style={styles.metricTexts}>
-                    <ThemeText category="caption">Yield Forecast</ThemeText>
+                    <ThemeText category="caption" style={styles.metricLabel}>
+                      Yield Forecast
+                    </ThemeText>
                     <ThemeText
                       category="bodyBold"
-                      style={{ color: Colors.lightGreen }}
+                      style={{ color: Colors.lightGreen, fontSize: 12 }}
                     >
                       {crop.yieldForecast}
                     </ThemeText>
                   </View>
                 </View>
 
+                {/* Water */}
                 <View style={styles.metricItem}>
-                  <Ionicons
-                    name="water-outline"
-                    size={16}
-                    color={themeColors.subText}
-                  />
+                  <View style={styles.metricIconWrap}>
+                    <Ionicons
+                      name="water-outline"
+                      size={15}
+                      color={getWaterColor(crop.waterNeed)}
+                    />
+                  </View>
                   <View style={styles.metricTexts}>
-                    <ThemeText category="caption">Water Demand</ThemeText>
+                    <ThemeText category="caption" style={styles.metricLabel}>
+                      Water Demand
+                    </ThemeText>
                     <ThemeText
                       category="bodyBold"
-                      style={{ color: getWaterColor(crop.waterNeed) }}
+                      style={{ color: getWaterColor(crop.waterNeed), fontSize: 12 }}
                     >
                       {crop.waterNeed}
                     </ThemeText>
                   </View>
                 </View>
 
+                {/* Duration */}
                 <View style={styles.metricItem}>
-                  <Ionicons
-                    name="time-outline"
-                    size={16}
-                    color={themeColors.subText}
-                  />
+                  <View style={styles.metricIconWrap}>
+                    <Ionicons
+                      name="time-outline"
+                      size={15}
+                      color={themeColors.subText}
+                    />
+                  </View>
                   <View style={styles.metricTexts}>
-                    <ThemeText category="caption">Duration</ThemeText>
-                    <ThemeText category="bodyBold">{crop.duration}</ThemeText>
+                    <ThemeText category="caption" style={styles.metricLabel}>
+                      Duration
+                    </ThemeText>
+                    <ThemeText
+                      category="bodyBold"
+                      style={{ color: themeColors.text, fontSize: 12 }}
+                    >
+                      {crop.duration}
+                    </ThemeText>
                   </View>
                 </View>
 
+                {/* Profit */}
                 <View style={styles.metricItem}>
-                  <Ionicons
-                    name="cash-outline"
-                    size={16}
-                    color={themeColors.subText}
-                  />
+                  <View style={styles.metricIconWrap}>
+                    <Ionicons
+                      name="cash-outline"
+                      size={15}
+                      color={getProfitColor(crop.profitability)}
+                    />
+                  </View>
                   <View style={styles.metricTexts}>
-                    <ThemeText category="caption">Profit Index</ThemeText>
+                    <ThemeText category="caption" style={styles.metricLabel}>
+                      Profit Index
+                    </ThemeText>
                     <ThemeText
                       category="bodyBold"
-                      style={{
-                        color:
-                          crop.profitability === "High"
-                            ? Colors.lightGreen
-                            : Colors.accentYellow,
-                      }}
+                      style={{ color: getProfitColor(crop.profitability), fontSize: 12 }}
                     >
                       {crop.profitability}
                     </ThemeText>
@@ -395,32 +440,27 @@ export default function CropsScreen() {
                 </View>
               </View>
 
-              {/* CTA Row Inside Card */}
-              <View style={styles.cropCardActions}>
-                <TouchableOpacity
-                  style={[
-                    styles.actionLinkBtn,
-                    {
-                      backgroundColor: themeColors.isDark
-                        ? "#2E3F32"
-                        : "#F4F6F4",
-                    },
-                  ]}
-                  onPress={() =>
-                    Alert.alert(
-                      `${crop.name} details`,
-                      `Detailed soil depth requirements: 8-10 inches.\nIdeal fertilizer mix: 20-10-10 NPK.\nReady market buyers found in California central region.`,
-                    )
-                  }
-                >
-                  <ThemeText
-                    category="caption"
-                    style={{ color: Colors.darkGreen, fontWeight: "700" }}
-                  >
-                    View Growth Guide
-                  </ThemeText>
-                </TouchableOpacity>
-              </View>
+              {/* ── CTA button ── */}
+              <TouchableOpacity
+                style={[
+                  styles.guideBtn,
+                  {
+                    backgroundColor: themeColors.isDark
+                      ? Colors.darkGreen + "30"
+                      : Colors.lightGreen + "18",
+                  },
+                ]}
+                onPress={() =>
+                  Alert.alert(
+                    `${crop.name} – Growth Guide`,
+                    `Soil depth: 8–10 inches.\nFertilizer mix: 20-10-10 NPK.\nMarket buyers available in central region.`,
+                  )
+                }
+              >
+                <Ionicons name="book-outline" size={14} color={Colors.darkGreen} />
+                <Text style={styles.guideBtnText}>View Growth Guide</Text>
+                <Ionicons name="chevron-forward" size={14} color={Colors.darkGreen} />
+              </TouchableOpacity>
             </EarthyCard>
           ))
         )}
@@ -430,7 +470,7 @@ export default function CropsScreen() {
           variant="outline"
           icon="chevron-back"
           onPress={() => router.back()}
-          style={{ marginTop: 12 }}
+          style={{ marginTop: 8, marginBottom: 16 }}
         />
       </ScrollView>
     </View>
@@ -441,48 +481,75 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
+
+  // ── Header ──────────────────────────────────────────────────────────────
   header: {
     flexDirection: "row",
-    justifyContent: "space-between",
     alignItems: "center",
-    paddingHorizontal: 24,
+    paddingHorizontal: 16,
     paddingTop: 56,
-    paddingBottom: 16,
+    paddingBottom: 14,
     borderBottomWidth: 1,
+    gap: 8,
+  },
+  headerIconBtn: {
+    width: 38,
+    height: 38,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 12,
   },
   headerTitleBox: {
+    flex: 1,
     alignItems: "center",
   },
-  seasonTabs: {
-    height: 60,
+  headerTitle: {
+    fontSize: 17,
+    fontWeight: "800",
+    textAlign: "center",
+  },
+  headerSubtitle: {
+    textAlign: "center",
+    marginTop: 1,
+  },
+
+  // ── Season selector ─────────────────────────────────────────────────────
+  seasonBar: {
     borderBottomWidth: 1,
     paddingVertical: 10,
   },
-  tabsScrollContent: {
-    paddingHorizontal: 20,
-    alignItems: "center",
-  },
-  tabBtn: {
+  seasonScrollContent: {
     paddingHorizontal: 16,
+    alignItems: "center",
+    gap: 8,
+  },
+  seasonTab: {
+    paddingHorizontal: 18,
     paddingVertical: 8,
     borderRadius: 20,
-    marginRight: 10,
     alignItems: "center",
     justifyContent: "center",
   },
-  tabText: {
+  seasonTabActive: {
+    backgroundColor: Colors.darkGreen,
+  },
+  seasonTabText: {
     fontSize: 13,
     fontWeight: "700",
   },
+
+  // ── Scroll content ──────────────────────────────────────────────────────
   scrollContent: {
-    paddingHorizontal: 24,
+    paddingHorizontal: 16,
     paddingTop: 16,
     paddingBottom: 40,
   },
+
+  // ── AI advisory card ────────────────────────────────────────────────────
   aiCard: {
     backgroundColor: Colors.lightGreen + "12",
     borderWidth: 1,
-    borderColor: Colors.lightGreen + "30",
+    borderColor: Colors.lightGreen + "35",
     padding: 14,
     borderRadius: 16,
     marginBottom: 16,
@@ -491,62 +558,80 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     marginBottom: 6,
+    gap: 6,
   },
   aiTitle: {
-    marginLeft: 6,
     color: Colors.darkGreen,
+    flex: 1,
+    fontSize: 13,
   },
   aiText: {
     color: Colors.darkGreen,
     lineHeight: 18,
     fontStyle: "italic",
   },
+
+  // ── Section title ───────────────────────────────────────────────────────
   sectionTitle: {
     fontWeight: "800",
     marginBottom: 12,
   },
+
+  // ── Empty state ─────────────────────────────────────────────────────────
   emptyState: {
     alignItems: "center",
-    paddingVertical: 40,
+    paddingVertical: 48,
   },
+
+  // ── Crop card ───────────────────────────────────────────────────────────
   cropCard: {
     padding: 16,
     borderRadius: 20,
     marginBottom: 16,
   },
-  cropCardHeader: {
+
+  // Top row: icon+name  |  badge
+  cropTopRow: {
     flexDirection: "row",
-    justifyContent: "space-between",
     alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 8,
   },
-  cropInfoLeft: {
+  cropIconAndName: {
     flexDirection: "row",
     alignItems: "center",
     flex: 1,
+    marginRight: 12,
+    gap: 10,
   },
   cropIconBg: {
-    width: 44,
-    height: 44,
-    borderRadius: 14,
+    width: 42,
+    height: 42,
+    borderRadius: 13,
     alignItems: "center",
     justifyContent: "center",
+    flexShrink: 0,
   },
   cropName: {
     fontSize: 16,
     fontWeight: "800",
+    flex: 1,
   },
-  suitBadgeOuter: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    borderWidth: 3,
+
+  // Match badge
+  suitBadge: {
+    width: 58,
+    height: 58,
+    borderRadius: 29,
+    borderWidth: 2.5,
     borderColor: Colors.lightGreen,
+    backgroundColor: Colors.lightGreen + "12",
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: Colors.lightGreen + "10",
+    flexShrink: 0,
   },
   suitBadgeVal: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: "900",
     color: Colors.darkGreen,
   },
@@ -554,35 +639,67 @@ const styles = StyleSheet.create({
     fontSize: 8,
     fontWeight: "600",
     color: Colors.textSecondary,
-    marginTop: -1,
   },
+
+  // Description (full width under header row)
+  cropDesc: {
+    fontSize: 12,
+    lineHeight: 18,
+    marginBottom: 4,
+  },
+
+  // Divider
   divider: {
     height: 1,
-    backgroundColor: Colors.lightGray,
-    marginVertical: 14,
+    marginVertical: 12,
   },
+
+  // Metrics 2-col grid
   metricsGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
-    justifyContent: "space-between",
+    marginBottom: 12,
   },
   metricItem: {
-    width: "48%",
+    width: "50%",
     flexDirection: "row",
+    alignItems: "flex-start",
+    paddingRight: 8,
+    marginBottom: 12,
+    gap: 8,
+  },
+  metricIconWrap: {
+    width: 28,
+    height: 28,
+    borderRadius: 8,
+    backgroundColor: Colors.lightGray + "80",
     alignItems: "center",
-    marginVertical: 8,
+    justifyContent: "center",
+    flexShrink: 0,
   },
   metricTexts: {
-    marginLeft: 8,
+    flex: 1,
   },
-  cropCardActions: {
+  metricLabel: {
+    fontSize: 10,
+    marginBottom: 2,
+  },
+
+  // Growth Guide button
+  guideBtn: {
     flexDirection: "row",
-    justifyContent: "flex-end",
-    marginTop: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    gap: 6,
   },
-  actionLinkBtn: {
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 8,
+  guideBtnText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: Colors.darkGreen,
+    flex: 1,
+    textAlign: "center",
   },
 });
