@@ -72,7 +72,6 @@ export default function WeatherScreen() {
 
   const [selectedCrop, setSelectedCrop] = useState<string>("General");
 
-  // Map weather condition codes to Ionicons
   const getWeatherIcon = (code: number): any => {
     if (code === 1000) return "sunny";
     if ([1003, 1006].includes(code)) return "partly-sunny";
@@ -80,7 +79,7 @@ export default function WeatherScreen() {
     if (
       [
         1063, 1150, 1153, 1168, 1171, 1180, 1183, 1186, 1189, 1192, 1195, 1201,
-        1207, 1240, 1243, 1246, 1249, 1252, 1255, 1264, 1267
+        1207, 1240, 1243, 1246, 1249, 1252, 1255, 1264, 1267,
       ].includes(code)
     )
       return "rainy";
@@ -88,7 +87,7 @@ export default function WeatherScreen() {
     if (
       [
         1066, 1069, 1072, 1114, 1117, 1210, 1213, 1216, 1219, 1222, 1225, 1237,
-        1258, 1261, 1279, 1282
+        1258, 1261, 1279, 1282,
       ].includes(code)
     )
       return "snow";
@@ -101,7 +100,7 @@ export default function WeatherScreen() {
     if (
       [
         1063, 1150, 1153, 1168, 1171, 1180, 1183, 1186, 1189, 1192, 1195, 1201,
-        1207, 1240, 1243, 1246, 1249, 1252, 1255, 1264, 1267
+        1207, 1240, 1243, 1246, 1249, 1252, 1255, 1264, 1267,
       ].includes(code)
     )
       return "#42A5F5";
@@ -109,7 +108,7 @@ export default function WeatherScreen() {
     if (
       [
         1066, 1069, 1072, 1114, 1117, 1210, 1213, 1216, 1219, 1222, 1225, 1237,
-        1258, 1261, 1279, 1282
+        1258, 1261, 1279, 1282,
       ].includes(code)
     )
       return "#90CAF9";
@@ -142,8 +141,12 @@ export default function WeatherScreen() {
     const uv = current.uv;
     const wind = current.wind_mph;
 
-    // Estimate Evapotranspiration (ET) in mm/day using a basic Penman-Monteith approximation
-    const etEstimate = Math.max(1.2, parseFloat(((temp * 0.12) + (wind * 0.05) + (uv * 0.15) - (humidity * 0.02)).toFixed(1)));
+    const etEstimate = Math.max(
+      1.2,
+      parseFloat(
+        (temp * 0.12 + wind * 0.05 + uv * 0.15 - humidity * 0.02).toFixed(1),
+      ),
+    );
 
     let baseVol = 0;
     let cropTerm = "";
@@ -197,7 +200,8 @@ export default function WeatherScreen() {
 
       case "Vegetables":
         baseVol = 3.5;
-        cropTerm = "Shallow-rooted vegetables require frequent, light watering.";
+        cropTerm =
+          "Shallow-rooted vegetables require frequent, light watering.";
         if (tomorrowRainChance > 50) {
           statusText = "SKIP ADVISED";
           statusColor = "#E65100";
@@ -223,7 +227,8 @@ export default function WeatherScreen() {
 
       case "Citrus / Orchard":
         baseVol = 5.0;
-        cropTerm = "Orchards require deep root zone watering for fruit development.";
+        cropTerm =
+          "Orchards require deep root zone watering for fruit development.";
         if (tomorrowRainChance > 60) {
           statusText = "SKIP ADVISED";
           statusColor = "#E65100";
@@ -271,8 +276,20 @@ export default function WeatherScreen() {
     }
 
     const isSkip = statusText === "SKIP ADVISED";
-    const waterSavingsGallons = isSkip ? (crop === "Rice / Paddy" ? 22000 : 15000) : 0;
-    const hydrationIndex = Math.min(100, Math.max(10, Math.round((humidity * 0.5) + ((100 - temp * 2) * 0.2) + (tomorrowRainChance * 0.3))));
+    const waterSavingsGallons = isSkip
+      ? crop === "Rice / Paddy"
+        ? 22000
+        : 15000
+      : 0;
+    const hydrationIndex = Math.min(
+      100,
+      Math.max(
+        10,
+        Math.round(
+          humidity * 0.5 + (100 - temp * 2) * 0.2 + tomorrowRainChance * 0.3,
+        ),
+      ),
+    );
 
     return {
       statusText,
@@ -292,7 +309,6 @@ export default function WeatherScreen() {
       setLoading(true);
       setWeatherError(null);
 
-      // Fetch current weather
       const currentResponse = await fetch(
         `${BASE_URL}/current.json?key=${API_KEY}&q=${lat},${lon}&aqi=no`,
       );
@@ -301,7 +317,6 @@ export default function WeatherScreen() {
       }
       const currentData = await currentResponse.json();
 
-      // Fetch 5-day forecast
       const forecastResponse = await fetch(
         `${BASE_URL}/forecast.json?key=${API_KEY}&q=${lat},${lon}&days=5&aqi=no`,
       );
@@ -378,8 +393,6 @@ export default function WeatherScreen() {
     );
   }
 
-
-
   if (loading) {
     return (
       <View
@@ -446,8 +459,6 @@ export default function WeatherScreen() {
   const currentWeather = weatherData.current;
   const forecastDays = forecastData.forecast.forecastday;
 
-
-
   return (
     <View style={[styles.container, { backgroundColor: themeColors.bg }]}>
       {/* HEADER */}
@@ -468,10 +479,14 @@ export default function WeatherScreen() {
         contentContainerStyle={styles.scrollContent}
       >
         {!location && (
-          <TouchableOpacity style={styles.locationBanner} onPress={fetchLocation}>
+          <TouchableOpacity
+            style={styles.locationBanner}
+            onPress={fetchLocation}
+          >
             <Ionicons name="location-outline" size={16} color={Colors.white} />
             <Text style={styles.locationBannerText}>
-              Using default location. Tap to grant GPS access for live local weather.
+              Using default location. Tap to grant GPS access for live local
+              weather.
             </Text>
           </TouchableOpacity>
         )}
@@ -492,7 +507,9 @@ export default function WeatherScreen() {
                   style={{ color: "rgba(255,255,255,0.7)" }}
                 >
                   Feels like {Math.round(currentWeather.feelslike_c)}°C • 📍{" "}
-                  {location ? `${location.latitude.toFixed(3)}°, ${location.longitude.toFixed(3)}°` : "Default (Kathmandu)"}
+                  {location
+                    ? `${location.latitude.toFixed(3)}°, ${location.longitude.toFixed(3)}°`
+                    : "Default (Kathmandu)"}
                 </ThemeText>
               </View>
             </View>
@@ -548,7 +565,7 @@ export default function WeatherScreen() {
           </View>
         </EarthyCard>
 
-        {/* 5-DAY PREDICTIVE FORECAST */}
+        {/* 5-DAY FORECAST */}
         <ThemeText category="h3" style={styles.sectionTitle}>
           5-Day Forecast
         </ThemeText>
@@ -572,7 +589,6 @@ export default function WeatherScreen() {
                 {Math.round(item.day.maxtemp_c)}° /{" "}
                 {Math.round(item.day.mintemp_c)}°
               </ThemeText>
-
               <View style={styles.rainBadge}>
                 <Ionicons name="water" size={10} color="#42A5F5" />
                 <Text style={styles.rainBadgeText}>
@@ -588,20 +604,25 @@ export default function WeatherScreen() {
           Smart Irrigation Advisor
         </ThemeText>
 
-        {/* Crop Selection Selector Pills */}
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.cropSelectorScroll}
         >
-          {["General", "Rice / Paddy", "Maize / Corn", "Vegetables", "Citrus / Orchard"].map((crop) => (
+          {[
+            "General",
+            "Rice / Paddy",
+            "Maize / Corn",
+            "Vegetables",
+            "Citrus / Orchard",
+          ].map((crop) => (
             <TouchableOpacity
               key={crop}
               style={[
                 styles.cropPill,
                 selectedCrop === crop
                   ? { backgroundColor: Colors.darkGreen }
-                  : { backgroundColor: themeColors.border + "40" }
+                  : { backgroundColor: themeColors.border + "40" },
               ]}
               onPress={() => setSelectedCrop(crop)}
             >
@@ -610,7 +631,7 @@ export default function WeatherScreen() {
                   styles.cropPillText,
                   selectedCrop === crop
                     ? { color: Colors.white, fontWeight: "700" }
-                    : { color: themeColors.text }
+                    : { color: themeColors.text },
                 ]}
               >
                 {crop}
@@ -625,35 +646,51 @@ export default function WeatherScreen() {
 
           return (
             <EarthyCard style={styles.irrigationCard}>
+              {/* Header row: icon + title + status badge */}
               <View style={styles.irrigationCardHeader}>
                 <View style={styles.irrigationIconBg}>
-                  <Ionicons name="water" size={24} color={Colors.darkGreen} />
+                  <Ionicons name="water" size={20} color={Colors.darkGreen} />
                 </View>
-                <View style={{ marginLeft: 12, flex: 1 }}>
-                  <ThemeText category="h3">AI Water Optimizations</ThemeText>
-                  <ThemeText category="caption" style={{ color: Colors.textSecondary, marginTop: 2 }}>
-                    Crop: {selectedCrop} • {advice.cropTerm}
-                  </ThemeText>
+                <ThemeText category="h3" style={{ marginLeft: 10, flex: 1 }}>
+                  Irrigation Advisory
+                </ThemeText>
+                <View
+                  style={[
+                    styles.statusBadge,
+                    { backgroundColor: advice.statusColor + "18" },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.statusBadgeText,
+                      { color: advice.statusColor },
+                    ]}
+                  >
+                    {advice.statusText}
+                  </Text>
                 </View>
               </View>
 
-              {/* Advisory Box */}
+              {/* Advisory Text */}
               <View style={styles.advisoryTextBox}>
-                <ThemeText category="body" style={styles.irrigationAdvisoryText}>
-                  &ldquo;{advice.cycleAdvisory}&rdquo;
+                <ThemeText
+                  category="body"
+                  style={styles.irrigationAdvisoryText}
+                >
+                  {advice.cycleAdvisory}
                 </ThemeText>
               </View>
 
-              {/* Soil Hydration Gauge */}
-              <View style={styles.hydrationContainer}>
-                <View style={styles.hydrationHeader}>
-                  <ThemeText category="caption" style={{ fontWeight: "700" }}>
-                    Estimated Hydration Index
-                  </ThemeText>
-                  <ThemeText category="bodyBold" style={{ color: Colors.darkGreen }}>
-                    {advice.hydrationIndex}%
-                  </ThemeText>
-                </View>
+              {/* Hydration bar — single compact row */}
+              <View style={styles.hydrationRow}>
+                <Text
+                  style={[
+                    styles.hydrationLabel,
+                    { color: themeColors.text + "70" },
+                  ]}
+                >
+                  Hydration
+                </Text>
                 <View style={styles.hydrationProgressBg}>
                   <View
                     style={[
@@ -662,71 +699,35 @@ export default function WeatherScreen() {
                         width: `${advice.hydrationIndex}%`,
                         backgroundColor:
                           advice.hydrationIndex < 35
-                            ? "#FFA726" // Orange (dry)
+                            ? "#FFA726"
                             : advice.hydrationIndex < 75
-                            ? "#66BB6A" // Green (optimal)
-                            : "#29B6F6", // Light Blue (saturated)
+                              ? "#66BB6A"
+                              : "#29B6F6",
                       },
                     ]}
                   />
                 </View>
-                <View style={styles.hydrationLabelsRow}>
-                  <Text style={[styles.hydrationLabel, { color: themeColors.text + "80" }]}>Dry</Text>
-                  <Text style={[styles.hydrationLabel, { color: themeColors.text + "80" }]}>Optimal Zone</Text>
-                  <Text style={[styles.hydrationLabel, { color: themeColors.text + "80" }]}>Saturated</Text>
-                </View>
-              </View>
-
-              {/* Water Savings Counter if skip is advised */}
-              {advice.waterSavingsGallons > 0 && (
-                <View style={styles.savingsBanner}>
-                  <Ionicons name="gift-outline" size={16} color={Colors.darkGreen} />
-                  <Text style={styles.savingsText}>
-                    Conserves ~{advice.waterSavingsGallons.toLocaleString()} Gallons/Acre if cycle is skipped!
-                  </Text>
-                </View>
-              )}
-
-              {/* Details Grid */}
-              <View style={styles.irrigationDetailsGrid}>
-                <View style={styles.irrigationDetailBox}>
-                  <ThemeText category="caption">Status</ThemeText>
-                  <ThemeText
-                    category="bodyBold"
-                    style={{ color: advice.statusColor }}
-                  >
-                    {advice.statusText}
-                  </ThemeText>
-                </View>
-                <View style={styles.irrigationDetailBox}>
-                  <ThemeText category="caption">Est. Run Time</ThemeText>
-                  <ThemeText category="bodyBold">
-                    {advice.runTimeMinutes} mins
-                  </ThemeText>
-                </View>
-                <View style={styles.irrigationDetailBox}>
-                  <ThemeText category="caption">Water Volume</ThemeText>
-                  <ThemeText category="bodyBold">
-                    {advice.baseVol.toFixed(1)} L/m²
-                  </ThemeText>
-                </View>
-                <View style={styles.irrigationDetailBox}>
-                  <ThemeText category="caption">Est. ET Loss</ThemeText>
-                  <ThemeText category="bodyBold">
-                    {advice.etEstimate} mm/day
-                  </ThemeText>
-                </View>
+                <ThemeText
+                  category="caption"
+                  style={{
+                    fontWeight: "700",
+                    color: Colors.darkGreen,
+                    minWidth: 34,
+                    textAlign: "right",
+                  }}
+                >
+                  {advice.hydrationIndex}%
+                </ThemeText>
               </View>
             </EarthyCard>
           );
         })()}
 
-        {/* FARMING ALERTS */}
+        {/* ALERTS */}
         <ThemeText category="h3" style={styles.sectionTitle}>
           Alerts
         </ThemeText>
 
-        {/* High Humidity Alert */}
         {currentWeather.humidity > 70 && (
           <EarthyCard style={styles.alertCard}>
             <View style={styles.alertRow}>
@@ -752,7 +753,6 @@ export default function WeatherScreen() {
           </EarthyCard>
         )}
 
-        {/* UV Alert */}
         {currentWeather.uv >= 8 && (
           <EarthyCard style={styles.alertCard}>
             <View style={styles.alertRow}>
@@ -778,7 +778,6 @@ export default function WeatherScreen() {
           </EarthyCard>
         )}
 
-        {/* Wind Alert */}
         {currentWeather.wind_mph > 20 && (
           <EarthyCard style={styles.alertCard}>
             <View style={styles.alertRow}>
@@ -804,7 +803,6 @@ export default function WeatherScreen() {
           </EarthyCard>
         )}
 
-        {/* No Alerts */}
         {currentWeather.humidity <= 70 &&
           currentWeather.uv < 8 &&
           currentWeather.wind_mph <= 20 && (
@@ -879,7 +877,7 @@ const styles = StyleSheet.create({
   weatherMetricsDivider: {
     height: 1,
     backgroundColor: "rgba(255,255,255,0.15)",
-    marginVertical: 18,
+    marginVertical: 16,
   },
   weatherMetricsGrid: {
     flexDirection: "row",
@@ -890,7 +888,7 @@ const styles = StyleSheet.create({
     width: "48%",
     flexDirection: "row",
     alignItems: "center",
-    marginVertical: 6,
+    marginVertical: 5,
   },
   metricTextGroup: {
     marginLeft: 8,
@@ -906,15 +904,16 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     fontWeight: "800",
-    marginVertical: 12,
+    marginTop: 16,
+    marginBottom: 10,
   },
   forecastScroll: {
-    paddingVertical: 8,
+    paddingVertical: 4,
     paddingRight: 24,
-    marginBottom: 16,
+    marginBottom: 8,
   },
   forecastCard: {
-    width: 100,
+    width: 96,
     alignItems: "center",
     padding: 12,
     marginRight: 10,
@@ -939,8 +938,8 @@ const styles = StyleSheet.create({
     marginLeft: 2,
   },
   irrigationCard: {
-    padding: 16,
-    borderRadius: 20,
+    padding: 14,
+    borderRadius: 18,
     marginBottom: 16,
     backgroundColor: Colors.lightGreen + "12",
     borderWidth: 1,
@@ -952,30 +951,56 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   irrigationIconBg: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    backgroundColor: Colors.lightGreen + "20",
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    backgroundColor: Colors.lightGreen + "25",
     alignItems: "center",
     justifyContent: "center",
   },
+  statusBadge: {
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    borderRadius: 20,
+  },
+  statusBadgeText: {
+    fontSize: 10,
+    fontWeight: "800",
+    letterSpacing: 0.3,
+  },
   irrigationAdvisoryText: {
-    fontStyle: "italic",
-    lineHeight: 18,
+    lineHeight: 20,
     color: Colors.darkGreen,
     fontSize: 13,
   },
-  irrigationDetailsGrid: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginTop: 14,
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: Colors.lightGreen + "30",
+  advisoryTextBox: {
+    backgroundColor: "rgba(0,0,0,0.025)",
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 10,
+    marginBottom: 12,
+    borderLeftWidth: 3,
+    borderLeftColor: Colors.darkGreen,
   },
-  irrigationDetailBox: {
-    flex: 1,
+  hydrationRow: {
+    flexDirection: "row",
     alignItems: "center",
+    gap: 8,
+  },
+  hydrationProgressBg: {
+    flex: 1,
+    height: 6,
+    backgroundColor: "rgba(0,0,0,0.07)",
+    borderRadius: 3,
+    overflow: "hidden",
+  },
+  hydrationProgressBar: {
+    height: "100%",
+    borderRadius: 3,
+  },
+  hydrationLabel: {
+    fontSize: 10,
+    fontWeight: "600",
   },
   alertCard: {
     padding: 14,
@@ -1042,56 +1067,5 @@ const styles = StyleSheet.create({
   cropPillText: {
     fontSize: 12,
     fontWeight: "600",
-  },
-  advisoryTextBox: {
-    backgroundColor: "rgba(0,0,0,0.02)",
-    padding: 12,
-    borderRadius: 12,
-    marginBottom: 14,
-    borderLeftWidth: 3,
-    borderLeftColor: Colors.darkGreen,
-  },
-  hydrationContainer: {
-    marginBottom: 14,
-  },
-  hydrationHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 6,
-  },
-  hydrationProgressBg: {
-    height: 8,
-    backgroundColor: "rgba(0,0,0,0.06)",
-    borderRadius: 4,
-    overflow: "hidden",
-  },
-  hydrationProgressBar: {
-    height: "100%",
-    borderRadius: 4,
-  },
-  hydrationLabelsRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginTop: 4,
-  },
-  hydrationLabel: {
-    fontSize: 9,
-    fontWeight: "600",
-  },
-  savingsBanner: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: Colors.lightGreen + "20",
-    padding: 10,
-    borderRadius: 10,
-    marginBottom: 14,
-  },
-  savingsText: {
-    color: Colors.darkGreen,
-    fontSize: 11,
-    fontWeight: "700",
-    marginLeft: 6,
-    flex: 1,
   },
 });
