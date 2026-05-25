@@ -20,17 +20,32 @@ import {
 } from "../components/DesignSystem";
 import { Ionicons } from "@expo/vector-icons";
 import { useLocation } from "../hooks/useLocation";
+import { useFirebaseEmailAuth } from "../hooks/useFirebaseEmailAuth";
 
-// Authentication screen for login, signup, and password reset
-type AuthMode = "login" | "signup" | "forgot";
+// ─── Auth flow stages ────────────────────────────────────────────────────────
+// "input"       → user enters their email
+// "link_sent"   → email sent, waiting for user to tap the link
+// "manual"      → user wants to paste the magic link URL manually
+type Stage = "input" | "link_sent" | "manual";
 
 export default function AuthScreen() {
   const router = useRouter();
-  const [mode, setMode] = useState<AuthMode>("login");
   const { fetchLocation } = useLocation();
+  const {
+    sendLink,
+    completeSignInFromLink,
+    completeSignInManually,
+    loading,
+    error,
+    clearError,
+  } = useFirebaseEmailAuth();
+
+  const [stage, setStage] = useState<Stage>("input");
+  const [email, setEmail] = useState("");
+  const [pastedUrl, setPastedUrl] = useState("");
   const [isLocationLoading, setIsLocationLoading] = useState(false);
 
-  // Helper to fetch location and complete login flow
+  // ── After successful sign-in: fetch location then navigate home ────────────
   const completeLogin = async () => {
     setIsLocationLoading(true);
     try {
@@ -43,54 +58,59 @@ export default function AuthScreen() {
     }
   };
 
-  // Form fields
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-
-  // OTP Dialog state
-  const [showOtpModal, setShowOtpModal] = useState(false);
-  const [otpCode, setOtpCode] = useState("");
-
-  const handleAuthAction = async () => {
-    if (mode === "login") {
-      if (!email || !password) {
-        Alert.alert("Error", "Please fill in all fields.");
-        return;
-      }
-      await completeLogin();
-    } else if (mode === "signup") {
-      if (!name || !email || !password) {
-        Alert.alert("Error", "Please fill in all fields.");
-        return;
-      }
-      // Show OTP modal for registration verification
-      setShowOtpModal(true);
-    } else if (mode === "forgot") {
-      if (!email) {
-        Alert.alert("Error", "Please enter your email.");
-        return;
-      }
-      Alert.alert(
-        "Reset Link Sent",
-        "A password reset link has been dispatched to your email address.",
-        [{ text: "OK", onPress: () => setMode("login") }],
-      );
-    }
-  };
-
-  const handleOtpVerify = async () => {
-    if (otpCode.length < 4) {
-      Alert.alert("Verification Code", "Please enter the 4-digit code.");
+  // ── Step 1: Send the magic link ────────────────────────────────────────────
+  const handleSendLink = async () => {
+    if (!email.trim()) {
+      Alert.alert("Email required", "Please enter your email address.");
       return;
     }
-    setShowOtpModal(false);
-    await completeLogin();
+    const sent = await sendLink(email.trim());
+    if (sent) setStage("link_sent");
   };
 
+  // ── Step 2a: Complete via deep link URL (called from your deep link handler) ─
+  // Wire this up in your Expo linking config / app entry point, e.g.:
+  //   const url = await Linking.getInitialURL();
+  //   if (url) await completeSignInFromLink(url);
+  // Left here as a reference — not called from the UI directly.
+
+  // ── Step 2b: Manual URL paste ─────────────────────────────────────────────
+  const handleManualSignIn = async () => {
+    if (!pastedUrl.trim()) {
+      Alert.alert(
+        "Link required",
+        "Please paste the full sign-in URL from your email.",
+      );
+      return;
+    }
+
+    // If error is EMAIL_NEEDED (opened on different device), we already have
+    // the email field visible; otherwise use the stored email from step 1.
+    const success = await completeSignInManually(
+      pastedUrl.trim(),
+      email.trim(),
+    );
+    if (success) await completeLogin();
+  };
+
+  // ── Show Firebase error as an alert ───────────────────────────────────────
+  React.useEffect(() => {
+    if (error && error !== "EMAIL_NEEDED") {
+      Alert.alert("Authentication Error", error, [
+        { text: "OK", onPress: clearError },
+      ]);
+    }
+  }, [error]);
+
+  // ── Location loading screen ────────────────────────────────────────────────
   if (isLocationLoading) {
     return (
-      <View style={[styles.locationLoadingContainer, { backgroundColor: Colors.background }]}>
+      <View
+        style={[
+          styles.locationLoadingContainer,
+          { backgroundColor: Colors.background },
+        ]}
+      >
         <View style={styles.locationPulseContainer}>
           <AILoadingAnimation size={90} />
         </View>
@@ -98,7 +118,8 @@ export default function AuthScreen() {
           Syncing Field Context
         </ThemeText>
         <ThemeText category="body" style={styles.locationLoadingBody}>
-          Locating your field coordinates to fetch regional climate data and soil models.
+          Locating your field coordinates to fetch regional climate data and
+          soil models.
         </ThemeText>
       </View>
     );
@@ -123,44 +144,144 @@ export default function AuthScreen() {
           </ThemeText>
         </View>
 
-        {/* Auth form card */}
         <EarthyCard style={styles.authCard}>
-          <View style={styles.tabHeader}>
-            <TouchableOpacity
-              onPress={() => setMode("login")}
-              style={[styles.tabBtn, mode === "login" && styles.tabBtnActive]}
-            >
-              <ThemeText
-                category="h3"
-                style={[
-                  styles.tabBtnText,
-                  mode === "login" ? styles.textActive : styles.textInactive,
-                ]}
-              >
-                Sign In
+          {/* ── Stage: input ─────────────────────────────────────────────── */}
+          {stage === "input" && (
+            <>
+              <ThemeText category="h2" style={styles.cardTitle}>
+                Sign In / Sign Up
               </ThemeText>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              onPress={() => setMode("signup")}
-              style={[styles.tabBtn, mode === "signup" && styles.tabBtnActive]}
-            >
-              <ThemeText
-                category="h3"
-                style={[
-                  styles.tabBtnText,
-                  mode === "signup" ? styles.textActive : styles.textInactive,
-                ]}
-              >
-                Sign Up
+              <ThemeText category="body" style={styles.cardDesc}>
+                Enter your email and we will send you a magic link — no password
+                needed.
               </ThemeText>
-            </TouchableOpacity>
-          </View>
 
-          {mode === "forgot" && (
-            <View style={styles.forgotHeader}>
+              <EarthyInput
+                label="Email Address"
+                placeholder="example@farm.com"
+                value={email}
+                onChangeText={setEmail}
+                keyboardType="email-address"
+                icon="mail-outline"
+              />
+
+              <EarthyButton
+                title={loading ? "Sending…" : "Send Magic Link"}
+                onPress={handleSendLink}
+                style={styles.submitBtn}
+                disabled={loading}
+              />
+
+              {/* Divider */}
+              <View style={styles.dividerRow}>
+                <View style={styles.dividerLine} />
+                <ThemeText category="caption" style={styles.dividerText}>
+                  or continue with
+                </ThemeText>
+                <View style={styles.dividerLine} />
+              </View>
+
+              {/* Social Logins — wire up real OAuth here when ready */}
+              <View style={styles.socialRow}>
+                <TouchableOpacity
+                  style={styles.socialBtn}
+                  onPress={() =>
+                    Alert.alert("Coming soon", "Google sign-in coming soon.")
+                  }
+                >
+                  <Ionicons name="logo-google" size={20} color="#EA4335" />
+                  <ThemeText category="bodyBold" style={styles.socialBtnText}>
+                    Google
+                  </ThemeText>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.socialBtn}
+                  onPress={() =>
+                    Alert.alert("Coming soon", "Apple sign-in coming soon.")
+                  }
+                >
+                  <Ionicons name="logo-apple" size={20} color="#000000" />
+                  <ThemeText category="bodyBold" style={styles.socialBtnText}>
+                    Apple
+                  </ThemeText>
+                </TouchableOpacity>
+              </View>
+            </>
+          )}
+
+          {/* ── Stage: link_sent ──────────────────────────────────────────── */}
+          {stage === "link_sent" && (
+            <>
+              <View style={styles.sentIconWrapper}>
+                <Ionicons
+                  name="mail-open-outline"
+                  size={52}
+                  color={Colors.darkGreen}
+                />
+              </View>
+              <ThemeText category="h2" style={styles.cardTitle}>
+                Check Your Inbox
+              </ThemeText>
+              <ThemeText category="body" style={styles.cardDesc}>
+                We sent a magic link to{" "}
+                <ThemeText category="bodyBold">{email}</ThemeText>. Tap it to
+                sign in instantly — no password required.
+              </ThemeText>
+
+              <ThemeText category="caption" style={styles.hintText}>
+                The link expires in 1 hour. Make sure to open it on this device.
+              </ThemeText>
+
+              {/* Resend */}
               <TouchableOpacity
-                onPress={() => setMode("login")}
+                style={styles.resendBtn}
+                onPress={handleSendLink}
+                disabled={loading}
+              >
+                <Ionicons
+                  name="refresh-outline"
+                  size={16}
+                  color={Colors.darkGreen}
+                />
+                <ThemeText category="caption" style={styles.resendText}>
+                  {loading ? "Resending…" : "Resend link"}
+                </ThemeText>
+              </TouchableOpacity>
+
+              {/* Manual fallback */}
+              <TouchableOpacity
+                style={styles.manualBtn}
+                onPress={() => setStage("manual")}
+              >
+                <ThemeText category="caption" style={styles.manualBtnText}>
+                  Link not working? Paste it manually →
+                </ThemeText>
+              </TouchableOpacity>
+
+              {/* Change email */}
+              <TouchableOpacity
+                style={styles.changeEmailBtn}
+                onPress={() => {
+                  setStage("input");
+                  setEmail("");
+                }}
+              >
+                <ThemeText
+                  category="caption"
+                  style={{ color: Colors.textSecondary }}
+                >
+                  Use a different email
+                </ThemeText>
+              </TouchableOpacity>
+            </>
+          )}
+
+          {/* ── Stage: manual ─────────────────────────────────────────────── */}
+          {stage === "manual" && (
+            <>
+              <TouchableOpacity
+                onPress={() => setStage("link_sent")}
                 style={styles.backBtn}
               >
                 <Ionicons
@@ -169,173 +290,48 @@ export default function AuthScreen() {
                   color={Colors.darkGreen}
                 />
                 <ThemeText category="bodyBold" style={styles.backBtnText}>
-                  Back to Sign In
+                  Back
                 </ThemeText>
               </TouchableOpacity>
-              <ThemeText category="body" style={styles.forgotDesc}>
-                Enter your email address below, and we will send you
-                instructions to reset your password.
+
+              <ThemeText category="h2" style={styles.cardTitle}>
+                Paste Your Link
               </ThemeText>
-            </View>
-          )}
-
-          {/* Form Fields */}
-          {mode === "signup" && (
-            <EarthyInput
-              label="Full Name"
-              placeholder="Enter your name"
-              value={name}
-              onChangeText={setName}
-              icon="person-outline"
-            />
-          )}
-
-          <EarthyInput
-            label="Email Address"
-            placeholder="example@farm.com"
-            value={email}
-            onChangeText={setEmail}
-            keyboardType="email-address"
-            icon="mail-outline"
-          />
-
-          {mode !== "forgot" && (
-            <EarthyInput
-              label="Password"
-              placeholder="••••••••"
-              value={password}
-              onChangeText={setPassword}
-              secureTextEntry
-              icon="lock-closed-outline"
-            />
-          )}
-
-          {mode === "login" && (
-            <TouchableOpacity
-              onPress={() => setMode("forgot")}
-              style={styles.forgotBtnWrapper}
-            >
-              <ThemeText category="caption" style={styles.forgotText}>
-                Forgot Password?
+              <ThemeText category="body" style={styles.cardDesc}>
+                Open the email on any device, copy the full sign-in URL, and
+                paste it below.
               </ThemeText>
-            </TouchableOpacity>
+
+              {/* Show email field if we lost it (different device scenario) */}
+              {error === "EMAIL_NEEDED" && (
+                <EarthyInput
+                  label="Your Email"
+                  placeholder="example@farm.com"
+                  value={email}
+                  onChangeText={setEmail}
+                  keyboardType="email-address"
+                  icon="mail-outline"
+                />
+              )}
+
+              <EarthyInput
+                label="Sign-in URL"
+                placeholder="Paste the full link from your email here"
+                value={pastedUrl}
+                onChangeText={setPastedUrl}
+                icon="link-outline"
+              />
+
+              <EarthyButton
+                title={loading ? "Verifying…" : "Sign In"}
+                onPress={handleManualSignIn}
+                style={styles.submitBtn}
+                disabled={loading}
+              />
+            </>
           )}
-
-          {/* Submit Button */}
-          <EarthyButton
-            title={
-              mode === "login"
-                ? "Sign In"
-                : mode === "signup"
-                  ? "Create Account"
-                  : "Send Reset Link"
-            }
-            onPress={handleAuthAction}
-            style={styles.submitBtn}
-          />
-
-          {/* Divider */}
-          <View style={styles.dividerRow}>
-            <View style={styles.dividerLine} />
-            <ThemeText category="caption" style={styles.dividerText}>
-              or continue with
-            </ThemeText>
-            <View style={styles.dividerLine} />
-          </View>
-
-          {/* Social Logins */}
-          <View style={styles.socialRow}>
-            <TouchableOpacity style={styles.socialBtn} onPress={completeLogin}>
-              <Ionicons name="logo-google" size={20} color="#EA4335" />
-              <ThemeText category="bodyBold" style={styles.socialBtnText}>
-                Google
-              </ThemeText>
-            </TouchableOpacity>
-
-            <TouchableOpacity style={styles.socialBtn} onPress={completeLogin}>
-              <Ionicons name="logo-apple" size={20} color="#000000" />
-              <ThemeText category="bodyBold" style={styles.socialBtnText}>
-                Apple
-              </ThemeText>
-            </TouchableOpacity>
-          </View>
         </EarthyCard>
       </ScrollView>
-
-      {/* OTP Verification Modal */}
-      <Modal
-        animationType="slide"
-        transparent={true}
-        visible={showOtpModal}
-        onRequestClose={() => setShowOtpModal(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <EarthyCard style={styles.modalContent}>
-            <View style={styles.otpHeader}>
-              <View style={styles.otpIconBg}>
-                <Ionicons
-                  name="shield-checkmark"
-                  size={32}
-                  color={Colors.darkGreen}
-                />
-              </View>
-              <ThemeText category="h2" style={styles.otpTitle}>
-                Verify Your Account
-              </ThemeText>
-              <ThemeText category="body" style={styles.otpSub}>
-                We&apos;ve sent a 4-digit code to {email}. Enter it below to
-                complete signup.
-              </ThemeText>
-            </View>
-
-            <EarthyInput
-              placeholder="Enter 4-Digit Code"
-              value={otpCode}
-              onChangeText={(txt: string) => setOtpCode(txt.slice(0, 4))}
-              keyboardType="numeric"
-              icon="keypad-outline"
-              style={styles.otpInput}
-            />
-
-            <View style={styles.otpResendRow}>
-              <ThemeText category="caption">
-                Didn&apos;t receive code?
-              </ThemeText>
-              <TouchableOpacity
-                onPress={() =>
-                  Alert.alert(
-                    "Resent",
-                    "Verification code resent successfully.",
-                  )
-                }
-              >
-                <ThemeText category="caption" style={styles.resendBtnText}>
-                  {" "}
-                  Resend Code
-                </ThemeText>
-              </TouchableOpacity>
-            </View>
-
-            <EarthyButton
-              title="Verify & Register"
-              onPress={handleOtpVerify}
-              style={{ marginTop: 12 }}
-            />
-
-            <TouchableOpacity
-              onPress={() => setShowOtpModal(false)}
-              style={styles.otpCloseBtn}
-            >
-              <ThemeText
-                category="caption"
-                style={{ color: Colors.textSecondary }}
-              >
-                Cancel
-              </ThemeText>
-            </TouchableOpacity>
-          </EarthyCard>
-        </View>
-      </Modal>
     </KeyboardAvoidingView>
   );
 }
@@ -379,55 +375,25 @@ const styles = StyleSheet.create({
     padding: 24,
     borderRadius: 24,
   },
-  tabHeader: {
-    flexDirection: "row",
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.lightGray,
-    marginBottom: 20,
-  },
-  tabBtn: {
-    flex: 1,
-    paddingVertical: 12,
-    alignItems: "center",
-  },
-  tabBtnActive: {
-    borderBottomWidth: 2,
-    borderBottomColor: Colors.darkGreen,
-  },
-  tabBtnText: {
-    fontWeight: "700",
-  },
-  textActive: {
+  cardTitle: {
+    fontWeight: "800",
     color: Colors.darkGreen,
-  },
-  textInactive: {
-    color: Colors.textSecondary,
-  },
-  forgotHeader: {
-    marginBottom: 16,
-  },
-  backBtn: {
-    flexDirection: "row",
-    alignItems: "center",
     marginBottom: 8,
+    textAlign: "center",
   },
-  backBtnText: {
-    color: Colors.darkGreen,
-    marginLeft: 6,
-  },
-  forgotDesc: {
+  cardDesc: {
     color: Colors.textSecondary,
     fontSize: 13,
+    lineHeight: 20,
+    textAlign: "center",
+    marginBottom: 24,
+  },
+  hintText: {
+    color: Colors.textSecondary,
+    textAlign: "center",
+    marginTop: 12,
+    fontSize: 12,
     lineHeight: 18,
-  },
-  forgotBtnWrapper: {
-    alignSelf: "flex-end",
-    marginVertical: 4,
-    paddingVertical: 4,
-  },
-  forgotText: {
-    color: Colors.darkGreen,
-    fontWeight: "600",
   },
   submitBtn: {
     marginTop: 16,
@@ -467,61 +433,43 @@ const styles = StyleSheet.create({
     marginLeft: 8,
     color: Colors.textPrimary,
   },
-  // Modal Styles
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.5)",
-    justifyContent: "center",
+  sentIconWrapper: {
     alignItems: "center",
-    padding: 24,
+    marginBottom: 16,
   },
-  modalContent: {
-    width: "100%",
-    padding: 24,
-    borderRadius: 24,
-    alignItems: "stretch",
-  },
-  otpHeader: {
-    alignItems: "center",
-    marginBottom: 20,
-  },
-  otpIconBg: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: Colors.lightGreen + "15",
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 12,
-  },
-  otpTitle: {
-    fontSize: 20,
-    fontWeight: "800",
-    color: Colors.darkGreen,
-    marginBottom: 8,
-  },
-  otpSub: {
-    textAlign: "center",
-    fontSize: 13,
-    color: Colors.textSecondary,
-    lineHeight: 18,
-  },
-  otpInput: {
-    marginBottom: 12,
-  },
-  otpResendRow: {
+  resendBtn: {
     flexDirection: "row",
+    alignItems: "center",
     justifyContent: "center",
-    marginBottom: 20,
+    marginTop: 20,
+    gap: 6,
   },
-  resendBtnText: {
+  resendText: {
     color: Colors.darkGreen,
-    fontWeight: "700",
+    fontWeight: "600",
   },
-  otpCloseBtn: {
+  manualBtn: {
     alignItems: "center",
     marginTop: 16,
     paddingVertical: 8,
+  },
+  manualBtnText: {
+    color: Colors.darkGreen,
+    fontWeight: "600",
+  },
+  changeEmailBtn: {
+    alignItems: "center",
+    marginTop: 8,
+    paddingVertical: 8,
+  },
+  backBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 16,
+    gap: 6,
+  },
+  backBtnText: {
+    color: Colors.darkGreen,
   },
   locationLoadingContainer: {
     flex: 1,
