@@ -17,8 +17,8 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { useLocation } from "../../../hooks/useLocation";
 
-const API_KEY = process.env.EXPO_PUBLIC_API_KEY;
-
+const API_KEY =
+  process.env.EXPO_PUBLIC_API_KEY || "c5d369f4fe4e4ffa9ed83005262405";
 const BASE_URL = "https://api.weatherapi.com/v1";
 
 interface WeatherData {
@@ -68,16 +68,29 @@ export default function WeatherScreen() {
   const [weatherData, setWeatherData] = useState<WeatherData | null>(null);
   const [forecastData, setForecastData] = useState<ForecastData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [weatherError, setWeatherError] = useState<string | null>(null);
+
+  const [selectedCrop, setSelectedCrop] = useState<string>("General");
 
   // Map weather condition codes to Ionicons
   const getWeatherIcon = (code: number): any => {
     if (code === 1000) return "sunny";
     if ([1003, 1006].includes(code)) return "partly-sunny";
     if ([1009, 1030, 1135, 1147].includes(code)) return "cloudy";
-    if ([1063, 1180, 1183, 1186, 1189, 1192, 1195, 1240, 1243, 1246].includes(code))
+    if (
+      [
+        1063, 1150, 1153, 1168, 1171, 1180, 1183, 1186, 1189, 1192, 1195, 1201,
+        1207, 1240, 1243, 1246, 1249, 1252, 1255, 1264, 1267
+      ].includes(code)
+    )
       return "rainy";
     if ([1087, 1273, 1276].includes(code)) return "thunderstorm";
-    if ([1066, 1069, 1072, 1114, 1117, 1210, 1213, 1216, 1219, 1222, 1225, 1237, 1249, 1252, 1255, 1258, 1261, 1264].includes(code))
+    if (
+      [
+        1066, 1069, 1072, 1114, 1117, 1210, 1213, 1216, 1219, 1222, 1225, 1237,
+        1258, 1261, 1279, 1282
+      ].includes(code)
+    )
       return "snow";
     return "partly-sunny";
   };
@@ -85,10 +98,20 @@ export default function WeatherScreen() {
   const getWeatherIconColor = (code: number): string => {
     if (code === 1000) return "#FFB300";
     if ([1003, 1006].includes(code)) return "#FFA726";
-    if ([1063, 1180, 1183, 1186, 1189, 1192, 1195, 1240, 1243, 1246].includes(code))
+    if (
+      [
+        1063, 1150, 1153, 1168, 1171, 1180, 1183, 1186, 1189, 1192, 1195, 1201,
+        1207, 1240, 1243, 1246, 1249, 1252, 1255, 1264, 1267
+      ].includes(code)
+    )
       return "#42A5F5";
     if ([1087, 1273, 1276].includes(code)) return "#0288D1";
-    if ([1066, 1069, 1072, 1114, 1117, 1210, 1213, 1216, 1219, 1222, 1225, 1237, 1249, 1252, 1255, 1258, 1261, 1264].includes(code))
+    if (
+      [
+        1066, 1069, 1072, 1114, 1117, 1210, 1213, 1216, 1219, 1222, 1225, 1237,
+        1258, 1261, 1279, 1282
+      ].includes(code)
+    )
       return "#90CAF9";
     return "#9E9E9E";
   };
@@ -108,38 +131,191 @@ export default function WeatherScreen() {
     return date.toLocaleDateString("en-US", { weekday: "short" });
   };
 
+  const getCropIrrigationAdvice = (crop: string) => {
+    const current = weatherData?.current;
+    if (!current || !forecastData) return null;
+
+    const tomorrowForecast = forecastData.forecast.forecastday[1]?.day;
+    const tomorrowRainChance = tomorrowForecast?.daily_chance_of_rain || 0;
+    const humidity = current.humidity;
+    const temp = current.temp_c;
+    const uv = current.uv;
+    const wind = current.wind_mph;
+
+    // Estimate Evapotranspiration (ET) in mm/day using a basic Penman-Monteith approximation
+    const etEstimate = Math.max(1.2, parseFloat(((temp * 0.12) + (wind * 0.05) + (uv * 0.15) - (humidity * 0.02)).toFixed(1)));
+
+    let baseVol = 0;
+    let cropTerm = "";
+    let cycleAdvisory = "";
+    let runTimeMinutes = 0;
+    let statusText = "NORMAL";
+    let statusColor = "#2E7D32";
+
+    switch (crop) {
+      case "Rice / Paddy":
+        baseVol = 8.5;
+        cropTerm = "Paddy fields require standing water (2-5 cm).";
+        if (tomorrowRainChance > 70) {
+          statusText = "SKIP ADVISED";
+          statusColor = "#E65100";
+          cycleAdvisory = `Heavy natural rain (${tomorrowRainChance}%) expected. Skip cycle to prevent overflow and bund erosion. Ensure drainage gates are clear.`;
+          runTimeMinutes = 0;
+        } else if (tomorrowRainChance > 40) {
+          statusText = "REDUCED";
+          statusColor = "#0288D1";
+          cycleAdvisory = `Moderate rain probability (${tomorrowRainChance}%). Reduce supplementation to 15 mins. Let rain top off standing water.`;
+          runTimeMinutes = 15;
+        } else {
+          statusText = "NORMAL";
+          statusColor = "#2E7D32";
+          cycleAdvisory = `Dry conditions. Maintain standing water level. Run supplemental cycle for 45 mins tomorrow morning.`;
+          runTimeMinutes = 45;
+        }
+        break;
+
+      case "Maize / Corn":
+        baseVol = 4.0;
+        cropTerm = "Maize is highly sensitive to waterlogging at root level.";
+        if (tomorrowRainChance > 40) {
+          statusText = "SKIP ADVISED";
+          statusColor = "#E65100";
+          cycleAdvisory = `Rain chance is ${tomorrowRainChance}%. Skip cycle. Maize roots need breathing room; rainfall will suffice.`;
+          runTimeMinutes = 0;
+        } else if (temp > 30) {
+          statusText = "INCREASED";
+          statusColor = "#D32F2F";
+          cycleAdvisory = `High heat (${Math.round(temp)}°C). Increase irrigation by 20%. Run for 35 mins at early dawn (5:30 AM) to prevent transpiration stress.`;
+          runTimeMinutes = 35;
+        } else {
+          statusText = "NORMAL";
+          statusColor = "#2E7D32";
+          cycleAdvisory = `Stable conditions. Run standard 25-minute cycle tomorrow morning.`;
+          runTimeMinutes = 25;
+        }
+        break;
+
+      case "Vegetables":
+        baseVol = 3.5;
+        cropTerm = "Shallow-rooted vegetables require frequent, light watering.";
+        if (tomorrowRainChance > 50) {
+          statusText = "SKIP ADVISED";
+          statusColor = "#E65100";
+          cycleAdvisory = `High rain probability (${tomorrowRainChance}%). Skip morning irrigation. Monitor soil surface in afternoon.`;
+          runTimeMinutes = 0;
+        } else if (humidity > 80) {
+          statusText = "REDUCED";
+          statusColor = "#0288D1";
+          cycleAdvisory = `High humidity (${humidity}%) slows transpiration and increases mold/fungi risk. Reduce run time to 15 mins.`;
+          runTimeMinutes = 15;
+        } else if (temp > 32) {
+          statusText = "INCREASED";
+          statusColor = "#D32F2F";
+          cycleAdvisory = `Extreme temperature (${Math.round(temp)}°C). Vegetables risk wilting. Run two split cycles: 20 mins at dawn, 10 mins at dusk.`;
+          runTimeMinutes = 30;
+        } else {
+          statusText = "NORMAL";
+          statusColor = "#2E7D32";
+          cycleAdvisory = `Normal evapotranspiration. Run standard 20-minute cycle tomorrow morning.`;
+          runTimeMinutes = 20;
+        }
+        break;
+
+      case "Citrus / Orchard":
+        baseVol = 5.0;
+        cropTerm = "Orchards require deep root zone watering for fruit development.";
+        if (tomorrowRainChance > 60) {
+          statusText = "SKIP ADVISED";
+          statusColor = "#E65100";
+          cycleAdvisory = `Significant rain expected (${tomorrowRainChance}%). Skip cycle. Let deep rain saturate the subsoil.`;
+          runTimeMinutes = 0;
+        } else if (temp > 33) {
+          statusText = "INCREASED";
+          statusColor = "#D32F2F";
+          cycleAdvisory = `Hot day. Run deep drip system for 40 mins. High ambient temperature increases soil water depletion.`;
+          runTimeMinutes = 40;
+        } else {
+          statusText = "NORMAL";
+          statusColor = "#2E7D32";
+          cycleAdvisory = `Standard orchard requirements. Run drip system for 30 mins tomorrow morning.`;
+          runTimeMinutes = 30;
+        }
+        break;
+
+      case "General":
+      default:
+        baseVol = 4.5;
+        cropTerm = "Average requirement for standard loamy garden soil.";
+        if (tomorrowRainChance > 50) {
+          statusText = "SKIP ADVISED";
+          statusColor = "#E65100";
+          cycleAdvisory = `Rain probability is ${tomorrowRainChance}% tomorrow. Skip irrigation cycle to save water and prevent runoff.`;
+          runTimeMinutes = 0;
+        } else if (humidity > 80) {
+          statusText = "REDUCED";
+          statusColor = "#0288D1";
+          cycleAdvisory = `Relative humidity is high (${humidity}%). Reduce water cycle duration by 25% to mitigate fungal risks.`;
+          runTimeMinutes = 15;
+        } else if (temp > 32) {
+          statusText = "INCREASED";
+          statusColor = "#D32F2F";
+          cycleAdvisory = `High temperature (${Math.round(temp)}°C) accelerates evaporation. Increase cycle duration by 20%.`;
+          runTimeMinutes = 30;
+        } else {
+          statusText = "NORMAL";
+          statusColor = "#2E7D32";
+          cycleAdvisory = `Weather stable. Maintain standard irrigation schedule tomorrow morning.`;
+          runTimeMinutes = 25;
+        }
+        break;
+    }
+
+    const isSkip = statusText === "SKIP ADVISED";
+    const waterSavingsGallons = isSkip ? (crop === "Rice / Paddy" ? 22000 : 15000) : 0;
+    const hydrationIndex = Math.min(100, Math.max(10, Math.round((humidity * 0.5) + ((100 - temp * 2) * 0.2) + (tomorrowRainChance * 0.3))));
+
+    return {
+      statusText,
+      statusColor,
+      cycleAdvisory,
+      runTimeMinutes,
+      baseVol,
+      cropTerm,
+      etEstimate,
+      waterSavingsGallons,
+      hydrationIndex,
+    };
+  };
+
   const fetchWeatherData = async (lat: number, lon: number) => {
     try {
       setLoading(true);
+      setWeatherError(null);
 
       // Fetch current weather
       const currentResponse = await fetch(
-        `${BASE_URL}/current.json?key=${API_KEY}&q=${lat},${lon}&aqi=no`
+        `${BASE_URL}/current.json?key=${API_KEY}&q=${lat},${lon}&aqi=no`,
       );
-
       if (!currentResponse.ok) {
-        throw new Error("Failed to fetch current weather");
+        throw new Error("Failed to fetch current weather details");
       }
-
       const currentData = await currentResponse.json();
 
       // Fetch 5-day forecast
       const forecastResponse = await fetch(
-        `${BASE_URL}/forecast.json?key=${API_KEY}&q=${lat},${lon}&days=5&aqi=no`
+        `${BASE_URL}/forecast.json?key=${API_KEY}&q=${lat},${lon}&days=5&aqi=no`,
       );
-
       if (!forecastResponse.ok) {
-        throw new Error("Failed to fetch forecast");
+        throw new Error("Failed to fetch forecast details");
       }
-
       const forecastDataResponse = await forecastResponse.json();
 
       setWeatherData(currentData);
       setForecastData(forecastDataResponse);
-      setLoading(false);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error fetching weather:", error);
-      Alert.alert("Error", "Failed to fetch weather data. Please try again.");
+      setWeatherError(error.message || "Failed to fetch weather data");
+    } finally {
       setLoading(false);
     }
   };
@@ -147,52 +323,122 @@ export default function WeatherScreen() {
   useEffect(() => {
     const initializeWeather = async () => {
       let coords = location;
-
-      // If no location yet, try to fetch it
       if (!coords && fetchLocation) {
         coords = await fetchLocation();
       }
-
-      // Use location if available, otherwise use default Kathmandu coordinates
-      const lat = coords?.latitude || 27.6221;
-      const lon = coords?.longitude || 85.5428;
-
-      await fetchWeatherData(lat, lon);
+      if (coords) {
+        await fetchWeatherData(coords.latitude, coords.longitude);
+      } else {
+        await fetchWeatherData(27.7172, 85.324);
+      }
     };
 
     initializeWeather();
   }, [location]);
 
   const handleRefresh = async () => {
-    // Try to get fresh location
     let coords = location;
     if (fetchLocation) {
       const newCoords = await fetchLocation();
       coords = newCoords || coords;
     }
 
-    const lat = coords?.latitude || 27.6221;
-    const lon = coords?.longitude || 85.5428;
-
-    await fetchWeatherData(lat, lon);
-    Alert.alert(
-      "Refresh",
-      "Weather and telemetry details refreshed successfully."
-    );
+    if (coords) {
+      await fetchWeatherData(coords.latitude, coords.longitude);
+      Alert.alert(
+        "Refresh",
+        "Weather and telemetry details refreshed successfully.",
+      );
+    } else {
+      await fetchWeatherData(27.7172, 85.324);
+      Alert.alert(
+        "Refresh",
+        "Weather details refreshed successfully using default location.",
+      );
+    }
   };
 
-  if (loading || !weatherData || !forecastData) {
+  if (locationLoading) {
     return (
       <View
         style={[
           styles.container,
-          { backgroundColor: themeColors.bg, justifyContent: "center", alignItems: "center" },
+          {
+            backgroundColor: themeColors.bg,
+            justifyContent: "center",
+            alignItems: "center",
+          },
         ]}
       >
         <ActivityIndicator size="large" color={Colors.darkGreen} />
         <ThemeText category="body" style={{ marginTop: 16 }}>
-          {locationLoading ? "Getting your location..." : "Loading weather data..."}
+          Detecting location...
         </ThemeText>
+      </View>
+    );
+  }
+
+
+
+  if (loading) {
+    return (
+      <View
+        style={[
+          styles.container,
+          {
+            backgroundColor: themeColors.bg,
+            justifyContent: "center",
+            alignItems: "center",
+          },
+        ]}
+      >
+        <ActivityIndicator size="large" color={Colors.darkGreen} />
+        <ThemeText category="body" style={{ marginTop: 16 }}>
+          Loading weather data...
+        </ThemeText>
+      </View>
+    );
+  }
+
+  if (weatherError || !weatherData || !forecastData) {
+    return (
+      <View
+        style={[
+          styles.container,
+          {
+            backgroundColor: themeColors.bg,
+            justifyContent: "center",
+            alignItems: "center",
+            padding: 24,
+          },
+        ]}
+      >
+        <Ionicons
+          name="cloud-offline-outline"
+          size={48}
+          color={Colors.accentOrange}
+          style={{ marginBottom: 16 }}
+        />
+        <ThemeText category="h2" style={{ textAlign: "center" }}>
+          Weather Service Offline
+        </ThemeText>
+        <ThemeText
+          category="body"
+          style={{
+            marginTop: 8,
+            textAlign: "center",
+            color: Colors.textSecondary,
+          }}
+        >
+          {weatherError ||
+            "Unable to download telemetric data. Please check your internet connection."}
+        </ThemeText>
+        <TouchableOpacity
+          style={styles.retryBtnLarge}
+          onPress={() => fetchLocation()}
+        >
+          <Text style={styles.retryBtnTextLarge}>Retry Connection</Text>
+        </TouchableOpacity>
       </View>
     );
   }
@@ -200,16 +446,7 @@ export default function WeatherScreen() {
   const currentWeather = weatherData.current;
   const forecastDays = forecastData.forecast.forecastday;
 
-  // Calculate irrigation advisory based on forecast
-  const getRainProbability = () => {
-    if (forecastDays.length >= 2) {
-      return forecastDays[2]?.day?.daily_chance_of_rain || 0;
-    }
-    return 0;
-  };
 
-  const rainProbMonday = getRainProbability();
-  const shouldSkipIrrigation = rainProbMonday > 50;
 
   return (
     <View style={[styles.container, { backgroundColor: themeColors.bg }]}>
@@ -230,6 +467,15 @@ export default function WeatherScreen() {
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
       >
+        {!location && (
+          <TouchableOpacity style={styles.locationBanner} onPress={fetchLocation}>
+            <Ionicons name="location-outline" size={16} color={Colors.white} />
+            <Text style={styles.locationBannerText}>
+              Using default location. Tap to grant GPS access for live local weather.
+            </Text>
+          </TouchableOpacity>
+        )}
+
         {/* CURRENT WEATHER OVERVIEW */}
         <EarthyCard style={styles.currentWeatherCard}>
           <View style={styles.weatherSummaryRow}>
@@ -245,10 +491,8 @@ export default function WeatherScreen() {
                   category="caption"
                   style={{ color: "rgba(255,255,255,0.7)" }}
                 >
-                  Feels like {Math.round(currentWeather.feelslike_c)}°C
-                  {location && (
-                    <> • 📍 {location.latitude.toFixed(4)}°, {location.longitude.toFixed(4)}°</>
-                  )}
+                  Feels like {Math.round(currentWeather.feelslike_c)}°C • 📍{" "}
+                  {location ? `${location.latitude.toFixed(3)}°, ${location.longitude.toFixed(3)}°` : "Default (Kathmandu)"}
                 </ThemeText>
               </View>
             </View>
@@ -284,7 +528,8 @@ export default function WeatherScreen() {
               <Ionicons name="cloudy-outline" size={18} color={Colors.white} />
               <View style={styles.metricTextGroup}>
                 <Text style={styles.metricVal}>
-                  {currentWeather.wind_dir} {Math.round(currentWeather.wind_mph)} mph
+                  {currentWeather.wind_dir}{" "}
+                  {Math.round(currentWeather.wind_mph)} mph
                 </Text>
                 <Text style={styles.metricLbl}>Wind Speed</Text>
               </View>
@@ -294,7 +539,8 @@ export default function WeatherScreen() {
               <Ionicons name="sunny-outline" size={18} color={Colors.white} />
               <View style={styles.metricTextGroup}>
                 <Text style={styles.metricVal}>
-                  {Math.round(currentWeather.uv)} ({getUVDescription(currentWeather.uv)})
+                  {Math.round(currentWeather.uv)} (
+                  {getUVDescription(currentWeather.uv)})
                 </Text>
                 <Text style={styles.metricLbl}>Solar UV Index</Text>
               </View>
@@ -323,7 +569,8 @@ export default function WeatherScreen() {
                 style={{ marginVertical: 8 }}
               />
               <ThemeText category="caption" style={{ fontWeight: "700" }}>
-                {Math.round(item.day.maxtemp_c)}° / {Math.round(item.day.mintemp_c)}°
+                {Math.round(item.day.maxtemp_c)}° /{" "}
+                {Math.round(item.day.mintemp_c)}°
               </ThemeText>
 
               <View style={styles.rainBadge}>
@@ -340,69 +587,143 @@ export default function WeatherScreen() {
         <ThemeText category="h3" style={styles.sectionTitle}>
           Smart Irrigation Advisor
         </ThemeText>
-        <EarthyCard style={styles.irrigationCard}>
-          <View style={styles.irrigationCardHeader}>
-            <View style={styles.irrigationIconBg}>
-              <Ionicons name="water" size={24} color={Colors.darkGreen} />
-            </View>
-            <View style={{ marginLeft: 12, flex: 1 }}>
-              <ThemeText category="h3">AI Water Optimizations</ThemeText>
-              <ThemeText category="caption">
-                Saving target: {shouldSkipIrrigation ? "15,000" : "8,000"} Gallons
-              </ThemeText>
-            </View>
-          </View>
 
-          <ThemeText category="body" style={styles.irrigationAdvisoryText}>
-            {shouldSkipIrrigation ? (
-              <>
-                &ldquo;Rain probability rises to{" "}
-                <ThemeText category="bodyBold" style={{ color: Colors.darkGreen }}>
-                  {rainProbMonday}% on {getDayName(forecastDays[2]?.date, 2)}
-                </ThemeText>
-                . The advisor suggests skipping irrigation cycles to conserve water.
-                Monitor soil moisture levels and adjust as needed.&rdquo;
-              </>
-            ) : (
-              <>
-                &ldquo;Weather conditions are stable with low rain probability (
-                <ThemeText category="bodyBold" style={{ color: Colors.darkGreen }}>
-                  {rainProbMonday}%
-                </ThemeText>
-                ). Maintain standard irrigation schedule. Monitor UV levels for
-                potential increased water needs.&rdquo;
-              </>
-            )}
-          </ThemeText>
-
-          <View style={styles.irrigationDetailsGrid}>
-            <View style={styles.irrigationDetailBox}>
-              <ThemeText category="caption">Status</ThemeText>
-              <ThemeText
-                category="bodyBold"
-                style={{ color: shouldSkipIrrigation ? "#E65100" : "#2E7D32" }}
+        {/* Crop Selection Selector Pills */}
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.cropSelectorScroll}
+        >
+          {["General", "Rice / Paddy", "Maize / Corn", "Vegetables", "Citrus / Orchard"].map((crop) => (
+            <TouchableOpacity
+              key={crop}
+              style={[
+                styles.cropPill,
+                selectedCrop === crop
+                  ? { backgroundColor: Colors.darkGreen }
+                  : { backgroundColor: themeColors.border + "40" }
+              ]}
+              onPress={() => setSelectedCrop(crop)}
+            >
+              <Text
+                style={[
+                  styles.cropPillText,
+                  selectedCrop === crop
+                    ? { color: Colors.white, fontWeight: "700" }
+                    : { color: themeColors.text }
+                ]}
               >
-                {shouldSkipIrrigation ? "SKIP ADVISED" : "NORMAL"}
-              </ThemeText>
-            </View>
-            <View style={styles.irrigationDetailBox}>
-              <ThemeText category="caption">Humidity</ThemeText>
-              <ThemeText category="bodyBold">
-                {currentWeather.humidity}%
-              </ThemeText>
-            </View>
-            <View style={styles.irrigationDetailBox}>
-              <ThemeText category="caption">Precipitation</ThemeText>
-              <ThemeText category="bodyBold">
-                {currentWeather.precip_mm.toFixed(2)} mm
-              </ThemeText>
-            </View>
-          </View>
-        </EarthyCard>
+                {crop}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+
+        {(() => {
+          const advice = getCropIrrigationAdvice(selectedCrop);
+          if (!advice) return null;
+
+          return (
+            <EarthyCard style={styles.irrigationCard}>
+              <View style={styles.irrigationCardHeader}>
+                <View style={styles.irrigationIconBg}>
+                  <Ionicons name="water" size={24} color={Colors.darkGreen} />
+                </View>
+                <View style={{ marginLeft: 12, flex: 1 }}>
+                  <ThemeText category="h3">AI Water Optimizations</ThemeText>
+                  <ThemeText category="caption" style={{ color: Colors.textSecondary, marginTop: 2 }}>
+                    Crop: {selectedCrop} • {advice.cropTerm}
+                  </ThemeText>
+                </View>
+              </View>
+
+              {/* Advisory Box */}
+              <View style={styles.advisoryTextBox}>
+                <ThemeText category="body" style={styles.irrigationAdvisoryText}>
+                  &ldquo;{advice.cycleAdvisory}&rdquo;
+                </ThemeText>
+              </View>
+
+              {/* Soil Hydration Gauge */}
+              <View style={styles.hydrationContainer}>
+                <View style={styles.hydrationHeader}>
+                  <ThemeText category="caption" style={{ fontWeight: "700" }}>
+                    Estimated Hydration Index
+                  </ThemeText>
+                  <ThemeText category="bodyBold" style={{ color: Colors.darkGreen }}>
+                    {advice.hydrationIndex}%
+                  </ThemeText>
+                </View>
+                <View style={styles.hydrationProgressBg}>
+                  <View
+                    style={[
+                      styles.hydrationProgressBar,
+                      {
+                        width: `${advice.hydrationIndex}%`,
+                        backgroundColor:
+                          advice.hydrationIndex < 35
+                            ? "#FFA726" // Orange (dry)
+                            : advice.hydrationIndex < 75
+                            ? "#66BB6A" // Green (optimal)
+                            : "#29B6F6", // Light Blue (saturated)
+                      },
+                    ]}
+                  />
+                </View>
+                <View style={styles.hydrationLabelsRow}>
+                  <Text style={[styles.hydrationLabel, { color: themeColors.text + "80" }]}>Dry</Text>
+                  <Text style={[styles.hydrationLabel, { color: themeColors.text + "80" }]}>Optimal Zone</Text>
+                  <Text style={[styles.hydrationLabel, { color: themeColors.text + "80" }]}>Saturated</Text>
+                </View>
+              </View>
+
+              {/* Water Savings Counter if skip is advised */}
+              {advice.waterSavingsGallons > 0 && (
+                <View style={styles.savingsBanner}>
+                  <Ionicons name="gift-outline" size={16} color={Colors.darkGreen} />
+                  <Text style={styles.savingsText}>
+                    Conserves ~{advice.waterSavingsGallons.toLocaleString()} Gallons/Acre if cycle is skipped!
+                  </Text>
+                </View>
+              )}
+
+              {/* Details Grid */}
+              <View style={styles.irrigationDetailsGrid}>
+                <View style={styles.irrigationDetailBox}>
+                  <ThemeText category="caption">Status</ThemeText>
+                  <ThemeText
+                    category="bodyBold"
+                    style={{ color: advice.statusColor }}
+                  >
+                    {advice.statusText}
+                  </ThemeText>
+                </View>
+                <View style={styles.irrigationDetailBox}>
+                  <ThemeText category="caption">Est. Run Time</ThemeText>
+                  <ThemeText category="bodyBold">
+                    {advice.runTimeMinutes} mins
+                  </ThemeText>
+                </View>
+                <View style={styles.irrigationDetailBox}>
+                  <ThemeText category="caption">Water Volume</ThemeText>
+                  <ThemeText category="bodyBold">
+                    {advice.baseVol.toFixed(1)} L/m²
+                  </ThemeText>
+                </View>
+                <View style={styles.irrigationDetailBox}>
+                  <ThemeText category="caption">Est. ET Loss</ThemeText>
+                  <ThemeText category="bodyBold">
+                    {advice.etEstimate} mm/day
+                  </ThemeText>
+                </View>
+              </View>
+            </EarthyCard>
+          );
+        })()}
 
         {/* FARMING ALERTS */}
         <ThemeText category="h3" style={styles.sectionTitle}>
-          Active Farming Alerts
+          Alerts
         </ThemeText>
 
         {/* High Humidity Alert */}
@@ -422,9 +743,9 @@ export default function WeatherScreen() {
                   Fungal Risk Warning
                 </ThemeText>
                 <ThemeText category="caption" style={styles.alertDesc}>
-                  Current humidity at {currentWeather.humidity}% creates favorable
-                  conditions for fungal growth. Consider applying organic fungicide
-                  protection to crop bases.
+                  Current humidity at {currentWeather.humidity}% creates
+                  favorable conditions for fungal growth. Consider applying
+                  organic fungicide protection to crop bases.
                 </ThemeText>
               </View>
             </View>
@@ -448,9 +769,9 @@ export default function WeatherScreen() {
                   Extreme UV Advisory
                 </ThemeText>
                 <ThemeText category="caption" style={styles.alertDesc}>
-                  UV index at {Math.round(currentWeather.uv)} ({getUVDescription(currentWeather.uv)}).
-                  Move high-sensitivity seedlings under shade screens during peak hours
-                  (11:00 AM - 3:00 PM).
+                  UV index at {Math.round(currentWeather.uv)} (
+                  {getUVDescription(currentWeather.uv)}). Move high-sensitivity
+                  seedlings under shade screens during peak hours.
                 </ThemeText>
               </View>
             </View>
@@ -474,8 +795,9 @@ export default function WeatherScreen() {
                   High Wind Alert
                 </ThemeText>
                 <ThemeText category="caption" style={styles.alertDesc}>
-                  Wind speeds at {Math.round(currentWeather.wind_mph)} mph from {currentWeather.wind_dir}.
-                  Secure loose structures and consider delaying spraying operations.
+                  Wind speeds at {Math.round(currentWeather.wind_mph)} mph from{" "}
+                  {currentWeather.wind_dir}. Secure loose structures and delay
+                  spraying operations.
                 </ThemeText>
               </View>
             </View>
@@ -501,8 +823,8 @@ export default function WeatherScreen() {
                     No Active Alerts
                   </ThemeText>
                   <ThemeText category="caption" style={styles.alertDesc}>
-                    Weather conditions are favorable for normal farming operations.
-                    Continue with scheduled activities.
+                    Weather conditions are favorable for normal farming
+                    operations. Continue with scheduled activities.
                   </ThemeText>
                 </View>
               </View>
@@ -678,5 +1000,98 @@ const styles = StyleSheet.create({
   alertDesc: {
     marginTop: 4,
     lineHeight: 16,
+  },
+  retryBtnLarge: {
+    marginTop: 24,
+    backgroundColor: Colors.darkGreen,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 12,
+  },
+  retryBtnTextLarge: {
+    color: Colors.white,
+    fontWeight: "700",
+    fontSize: 14,
+  },
+  locationBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: Colors.accentOrange,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 12,
+    marginBottom: 16,
+  },
+  locationBannerText: {
+    color: Colors.white,
+    fontSize: 12,
+    fontWeight: "600",
+    marginLeft: 8,
+    flex: 1,
+  },
+  cropSelectorScroll: {
+    paddingVertical: 4,
+    marginBottom: 12,
+  },
+  cropPill: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    marginRight: 8,
+  },
+  cropPillText: {
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  advisoryTextBox: {
+    backgroundColor: "rgba(0,0,0,0.02)",
+    padding: 12,
+    borderRadius: 12,
+    marginBottom: 14,
+    borderLeftWidth: 3,
+    borderLeftColor: Colors.darkGreen,
+  },
+  hydrationContainer: {
+    marginBottom: 14,
+  },
+  hydrationHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 6,
+  },
+  hydrationProgressBg: {
+    height: 8,
+    backgroundColor: "rgba(0,0,0,0.06)",
+    borderRadius: 4,
+    overflow: "hidden",
+  },
+  hydrationProgressBar: {
+    height: "100%",
+    borderRadius: 4,
+  },
+  hydrationLabelsRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginTop: 4,
+  },
+  hydrationLabel: {
+    fontSize: 9,
+    fontWeight: "600",
+  },
+  savingsBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: Colors.lightGreen + "20",
+    padding: 10,
+    borderRadius: 10,
+    marginBottom: 14,
+  },
+  savingsText: {
+    color: Colors.darkGreen,
+    fontSize: 11,
+    fontWeight: "700",
+    marginLeft: 6,
+    flex: 1,
   },
 });

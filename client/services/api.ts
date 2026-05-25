@@ -3,7 +3,10 @@
 // Change 192.168.76.203 to your machine's actual IP address
 // Run: ifconfig | grep "inet " to find it
 
-const BACKEND_URL = "http://192.168.76.203:8000";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { Paths, File as FSFile } from "expo-file-system";
+
+const BACKEND_URL = "http://192.168.76.198:8000";
 
 // Normalise soil type from backend format to SOIL_PROFILES key format
 // e.g. "Black_Soil" → "Black Soil", "alluvial soil" → "Alluvial Soil"
@@ -64,6 +67,7 @@ export interface SoilScan {
   notes?: string;
   created_at: string;
   updated_at: string;
+  rag_data?: any; // Persistent structured RAG payload
 }
 
 export interface AnalyticsData {
@@ -138,73 +142,100 @@ export async function performInference(
   }
 }
 
-// Save soil scan result manually
+const LOCAL_SCANS_KEY = "soilsense_local_scans";
+
+// Helper function to seed mock database on first run
+async function seedLocalDatabase() {
+  // Database seeding disabled to keep recent scans empty initially
+}
+
+// Save soil scan result locally
 export async function saveSoilScan(
   scanData: Partial<SoilScan>,
 ): Promise<SoilScan> {
   try {
-    const response = await fetch(`${BACKEND_URL}/api/v1/soil-scan/save`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(scanData),
-    });
+    await seedLocalDatabase();
+    const rawScans = await AsyncStorage.getItem(LOCAL_SCANS_KEY);
+    const scans: SoilScan[] = rawScans ? JSON.parse(rawScans) : [];
 
-    if (!response.ok) {
-      throw new Error(`Server error ${response.status}`);
+    const id = scanData.id || `local_${Date.now()}`;
+    let persistentImageUri = scanData.image_uri || scanData.image_url;
+
+    // Persist photo to documents folder if it is in a temporary path
+    const docDirUri: string = Paths.document.uri;
+    if (persistentImageUri && !persistentImageUri.startsWith(docDirUri)) {
+      try {
+        const fileExt = persistentImageUri.split('.').pop() || "jpg";
+        const filename = `soil_scan_${id}.${fileExt}`;
+        const srcFile = new FSFile(persistentImageUri);
+        const destFile = new FSFile(Paths.document, filename);
+        await srcFile.copy(destFile);
+        persistentImageUri = destFile.uri;
+      } catch (e) {
+        console.error("Failed to copy image to local persistent documents folder:", e);
+      }
     }
 
-    const data: SoilScan = await response.json();
-    return data;
+    const newScan: SoilScan = {
+      id,
+      user_id: scanData.user_id || "user123",
+      image_uri: persistentImageUri,
+      image_url: persistentImageUri,
+      soil_type: scanData.soil_type || "Unknown Soil",
+      confidence_score: scanData.confidence_score ?? 100,
+      ph_range: scanData.ph_range,
+      npk_values: scanData.npk_values,
+      health_status: scanData.health_status || "Unknown",
+      quality_score: scanData.quality_score ?? 50,
+      recommendations: scanData.recommendations || [],
+      suggested_crops: scanData.suggested_crops || [],
+      fertilizer_recommendation: scanData.fertilizer_recommendation,
+      location: scanData.location,
+      field_name: scanData.field_name,
+      notes: scanData.notes,
+      created_at: scanData.created_at || new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      rag_data: scanData.rag_data,
+    };
+
+    const existingIdx = scans.findIndex(s => s.id === id);
+    if (existingIdx >= 0) {
+      scans[existingIdx] = newScan;
+    } else {
+      scans.unshift(newScan);
+    }
+
+    await AsyncStorage.setItem(LOCAL_SCANS_KEY, JSON.stringify(scans));
+    return newScan;
   } catch (error) {
     throw new Error(
-      error instanceof Error ? error.message : "Failed to save scan",
+      error instanceof Error ? error.message : "Failed to save scan locally",
     );
   }
 }
 
-// Get user's recent scans (for homepage)
+// Get user's recent scans locally
 export async function getRecentScans(
   userId: string,
   limit: number = 5,
 ): Promise<SoilScan[]> {
   try {
-    const url = `${BACKEND_URL}/api/v1/soil-scan/recent/${userId}?limit=${limit}`;
-    console.log("📡 Fetching recent scans from:", url);
+    await seedLocalDatabase();
+    const rawScans = await AsyncStorage.getItem(LOCAL_SCANS_KEY);
+    const scans: SoilScan[] = rawScans ? JSON.parse(rawScans) : [];
 
-    const response = await fetch(url, {
-      method: "GET",
-      headers: {
-        "Content-Type": "application/json",
-      },
-    });
+    const sorted = scans
+      .filter(s => s.user_id === userId)
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
-    if (!response.ok) {
-      throw new Error(`Server error ${response.status}`);
-    }
-
-    const rawData = await response.json();
-    console.log("✅ Backend returned scans:", rawData);
-    console.log("📊 Number of scans:", rawData.length);
-
-    const transformedData: SoilScan[] = rawData.map(transformScanResponse);
-
-    if (transformedData.length > 0) {
-      console.log("🔑 First scan ID (after transform):", transformedData[0].id);
-      console.log(
-        "📋 First scan after transform:",
-        JSON.stringify(transformedData[0], null, 2),
-      );
-    }
-    return transformedData;
+    return sorted.slice(0, limit);
   } catch (error) {
-    console.error("Error fetching recent scans:", error);
+    console.error("Error fetching recent scans locally:", error);
     return [];
   }
 }
 
-// Get user's scan history with pagination
+// Get user's scan history with pagination locally
 export async function getScanHistory(
   userId: string,
   skip: number = 0,
@@ -213,160 +244,215 @@ export async function getScanHistory(
   order: number = -1,
 ): Promise<SoilScan[]> {
   try {
-    const response = await fetch(
-      `${BACKEND_URL}/api/v1/soil-scan/history/${userId}?skip=${skip}&limit=${limit}&sort_by=${sortBy}&order=${order}`,
-      {
-        method: "GET",
-        headers: {
-          "Content-Type": "application/json",
-        },
-      },
-    );
+    await seedLocalDatabase();
+    const rawScans = await AsyncStorage.getItem(LOCAL_SCANS_KEY);
+    const scans: SoilScan[] = rawScans ? JSON.parse(rawScans) : [];
 
-    if (!response.ok) {
-      throw new Error(`Server error ${response.status}`);
-    }
+    const filtered = scans.filter(s => s.user_id === userId);
 
-    const rawData = await response.json();
-    const transformedData: SoilScan[] = rawData.map(transformScanResponse);
-    return transformedData;
+    // Sort based on sortBy and order
+    filtered.sort((a: any, b: any) => {
+      const valA = a[sortBy] ?? "";
+      const valB = b[sortBy] ?? "";
+
+      let comparison = 0;
+      if (typeof valA === "string" && typeof valB === "string") {
+        comparison = valA.localeCompare(valB);
+      } else if (typeof valA === "number" && typeof valB === "number") {
+        comparison = valA - valB;
+      }
+
+      return comparison * order;
+    });
+
+    return filtered.slice(skip, skip + limit);
   } catch (error) {
-    console.error("Error fetching scan history:", error);
+    console.error("Error fetching scan history locally:", error);
     return [];
   }
 }
 
-// Get user's analytics data
+// Get user's analytics data locally
 export async function getAnalytics(
   userId: string,
 ): Promise<AnalyticsData | null> {
   try {
-    const response = await fetch(
-      `${BACKEND_URL}/api/v1/soil-scan/analytics/${userId}`,
-      {
-        method: "GET",
-        headers: {
-          "Content-Type": "application/json",
-        },
-      },
-    );
+    await seedLocalDatabase();
+    const rawScans = await AsyncStorage.getItem(LOCAL_SCANS_KEY);
+    const scans: SoilScan[] = rawScans ? JSON.parse(rawScans) : [];
+    const userScans = scans.filter(s => s.user_id === userId);
 
-    if (!response.ok) {
-      throw new Error(`Server error ${response.status}`);
+    if (userScans.length === 0) {
+      return {
+        total_scans: 0,
+        scans_this_month: 0,
+        scans_this_week: 0,
+        soil_type_distribution: {},
+        health_distribution: {},
+        average_confidence: 0,
+        average_quality_score: 0,
+        most_common_soil_type: "N/A",
+        most_common_health_status: "N/A",
+        recent_scans: [],
+        scan_history_by_date: {},
+      };
     }
 
-    const rawData = await response.json();
+    const now = new Date();
+    const oneWeekAgo = new Date();
+    oneWeekAgo.setDate(now.getDate() - 7);
 
-    const data: AnalyticsData = {
-      ...rawData,
-      recent_scans: rawData.recent_scans?.map(transformScanResponse) || [],
+    const oneMonthAgo = new Date();
+    oneMonthAgo.setDate(now.getDate() - 30);
+
+    let scansThisWeek = 0;
+    let scansThisMonth = 0;
+    let totalConfidence = 0;
+    let totalQuality = 0;
+
+    const soilTypes: Record<string, number> = {};
+    const healths: Record<string, number> = {};
+    const dateHistory: Record<string, number> = {};
+
+    userScans.forEach(scan => {
+      const scanDate = new Date(scan.created_at);
+      if (scanDate >= oneWeekAgo) scansThisWeek++;
+      if (scanDate >= oneMonthAgo) scansThisMonth++;
+
+      totalConfidence += scan.confidence_score;
+      totalQuality += scan.quality_score ?? 50;
+
+      const type = scan.soil_type || "Unknown Soil";
+      soilTypes[type] = (soilTypes[type] || 0) + 1;
+
+      const health = scan.health_status || "Unknown";
+      healths[health] = (healths[health] || 0) + 1;
+
+      const dateStr = scanDate.toISOString().split("T")[0];
+      dateHistory[dateStr] = (dateHistory[dateStr] || 0) + 1;
+    });
+
+    let mostCommonSoil = "N/A";
+    let maxSoilCount = 0;
+    Object.entries(soilTypes).forEach(([soil, count]) => {
+      if (count > maxSoilCount) {
+        maxSoilCount = count;
+        mostCommonSoil = soil;
+      }
+    });
+
+    let mostCommonHealth = "N/A";
+    let maxHealthCount = 0;
+    Object.entries(healths).forEach(([health, count]) => {
+      if (count > maxHealthCount) {
+        maxHealthCount = count;
+        mostCommonHealth = health;
+      }
+    });
+
+    const sortedScans = [...userScans].sort(
+      (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    );
+
+    return {
+      total_scans: userScans.length,
+      scans_this_month: scansThisMonth,
+      scans_this_week: scansThisWeek,
+      soil_type_distribution: soilTypes,
+      health_distribution: healths,
+      average_confidence: totalConfidence / userScans.length,
+      average_quality_score: totalQuality / userScans.length,
+      most_common_soil_type: mostCommonSoil,
+      most_common_health_status: mostCommonHealth,
+      recent_scans: sortedScans.slice(0, 5),
+      scan_history_by_date: dateHistory,
     };
-
-    return data;
   } catch (error) {
-    console.error("Error fetching analytics:", error);
+    console.error("Error generating analytics locally:", error);
     return null;
   }
 }
 
-// Get total scan count
+// Get total scan count locally
 export async function getScanCount(userId: string): Promise<number> {
   try {
-    const response = await fetch(
-      `${BACKEND_URL}/api/v1/soil-scan/count/${userId}`,
-      {
-        method: "GET",
-        headers: {
-          "Content-Type": "application/json",
-        },
-      },
-    );
-
-    if (!response.ok) {
-      throw new Error(`Server error ${response.status}`);
-    }
-
-    const data: { user_id: string; total_scans: number } =
-      await response.json();
-    return data.total_scans;
+    await seedLocalDatabase();
+    const rawScans = await AsyncStorage.getItem(LOCAL_SCANS_KEY);
+    const scans: SoilScan[] = rawScans ? JSON.parse(rawScans) : [];
+    return scans.filter(s => s.user_id === userId).length;
   } catch (error) {
-    console.error("Error fetching scan count:", error);
+    console.error("Error getting scan count locally:", error);
     return 0;
   }
 }
 
-// Get specific scan by ID
+// Get specific scan by ID locally
 export async function getScanById(scanId: string): Promise<SoilScan | null> {
   try {
-    console.log("Fetching scan with ID:", scanId);
-    const url = `${BACKEND_URL}/api/v1/soil-scan/${scanId}`;
-    console.log("Full URL:", url);
-
-    const response = await fetch(url, {
-      method: "GET",
-      headers: {
-        "Content-Type": "application/json",
-      },
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error(`Server error ${response.status}:`, errorText);
-      throw new Error(`Server error ${response.status}: ${errorText}`);
-    }
-
-    const rawData = await response.json();
-    console.log("Raw scan data from backend:", rawData);
-
-    const transformedData = transformScanResponse(rawData);
-    console.log("Scan data after transform:", transformedData);
-    console.log("Transformed ID:", transformedData.id);
-    return transformedData;
+    await seedLocalDatabase();
+    const rawScans = await AsyncStorage.getItem(LOCAL_SCANS_KEY);
+    const scans: SoilScan[] = rawScans ? JSON.parse(rawScans) : [];
+    const found = scans.find(s => s.id === scanId);
+    return found || null;
   } catch (error) {
-    console.error("Error fetching scan:", error);
+    console.error("Error fetching scan by ID locally:", error);
     return null;
   }
 }
 
-// Update soil scan
+// Update soil scan locally
 export async function updateSoilScan(
   scanId: string,
   updateData: Partial<SoilScan>,
 ): Promise<SoilScan | null> {
   try {
-    const response = await fetch(`${BACKEND_URL}/api/v1/soil-scan/${scanId}`, {
-      method: "PUT",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(updateData),
-    });
+    const rawScans = await AsyncStorage.getItem(LOCAL_SCANS_KEY);
+    const scans: SoilScan[] = rawScans ? JSON.parse(rawScans) : [];
+    const idx = scans.findIndex(s => s.id === scanId);
+    if (idx === -1) return null;
 
-    if (!response.ok) {
-      throw new Error(`Server error ${response.status}`);
-    }
+    const updated = {
+      ...scans[idx],
+      ...updateData,
+      updated_at: new Date().toISOString(),
+    };
 
-    const data: SoilScan = await response.json();
-    return data;
+    scans[idx] = updated;
+    await AsyncStorage.setItem(LOCAL_SCANS_KEY, JSON.stringify(scans));
+    return updated;
   } catch (error) {
-    console.error("Error updating scan:", error);
+    console.error("Error updating scan locally:", error);
     return null;
   }
 }
 
-// Delete soil scan
+// Delete soil scan locally
 export async function deleteSoilScan(scanId: string): Promise<boolean> {
   try {
-    const response = await fetch(`${BACKEND_URL}/api/v1/soil-scan/${scanId}`, {
-      method: "DELETE",
-      headers: {
-        "Content-Type": "application/json",
-      },
-    });
+    const rawScans = await AsyncStorage.getItem(LOCAL_SCANS_KEY);
+    const scans: SoilScan[] = rawScans ? JSON.parse(rawScans) : [];
+    const idx = scans.findIndex(s => s.id === scanId);
+    if (idx === -1) return false;
 
-    return response.ok;
+    const scanToDelete = scans[idx];
+    const imgPath = scanToDelete.image_uri || scanToDelete.image_url;
+
+    // Delete image file persistently if stored in documents folder
+    const docDirUri: string = Paths.document.uri;
+    if (imgPath && imgPath.startsWith(docDirUri)) {
+      try {
+        const imgFile = new FSFile(imgPath);
+        await imgFile.delete();
+      } catch (e) {
+        console.warn("Failed to delete local image file:", e);
+      }
+    }
+
+    scans.splice(idx, 1);
+    await AsyncStorage.setItem(LOCAL_SCANS_KEY, JSON.stringify(scans));
+    return true;
   } catch (error) {
-    console.error("Error deleting scan:", error);
+    console.error("Error deleting scan locally:", error);
     return false;
   }
 }

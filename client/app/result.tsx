@@ -144,7 +144,7 @@ export default function ResultScreen() {
   const params = useLocalSearchParams<ResultParams>();
 
   const [scanData, setScanData] = useState<SoilScan | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(!!params.scanId);
 
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(24)).current;
@@ -156,10 +156,19 @@ export default function ResultScreen() {
       try {
         setLoading(true);
         const data = await getScanById(params.scanId!);
-        if (data) setScanData(data);
-        else Alert.alert("Error", "Failed to load scan data");
-      } catch {
-        Alert.alert("Error", "Failed to load scan data");
+        if (data) {
+          setScanData(data);
+        } else {
+          console.warn("Failed to find scan by ID in local DB:", params.scanId);
+          if (!params.prediction && !params.ragData) {
+            Alert.alert("Error", "Failed to load scan data");
+          }
+        }
+      } catch (err) {
+        console.error("Error fetching scan by ID:", err);
+        if (!params.prediction && !params.ragData) {
+          Alert.alert("Error", "Failed to load scan data");
+        }
       } finally {
         setLoading(false);
       }
@@ -167,24 +176,35 @@ export default function ResultScreen() {
   }, [params.scanId]);
 
   useEffect(() => {
-    Animated.parallel([
-      Animated.timing(fadeAnim, {
-        toValue: 1,
-        duration: 500,
-        useNativeDriver: true,
-      }),
-      Animated.timing(slideAnim, {
-        toValue: 0,
-        duration: 420,
-        useNativeDriver: true,
-      }),
-    ]).start();
-  }, []);
+    // Run the entrance animation whenever the loading state resolves to false.
+    // This is critical when scanId is present (loading starts as true) —
+    // if we only ran on mount, the animation would complete while the skeleton
+    // is shown, leaving the Animated.View invisible when it finally mounts.
+    if (!loading) {
+      fadeAnim.setValue(0);
+      slideAnim.setValue(24);
+      Animated.parallel([
+        Animated.timing(fadeAnim, {
+          toValue: 1,
+          duration: 450,
+          useNativeDriver: true,
+        }),
+        Animated.timing(slideAnim, {
+          toValue: 0,
+          duration: 380,
+          useNativeDriver: true,
+        }),
+      ]).start();
+    }
+  }, [loading]);
 
   // ── Parse rag_data from URL param (set by scan.tsx after inference) ───────
   const ragData: RagData | null = (() => {
-    // Priority 1: DB recommendations → reconstruct minimal RagData
+    // Priority 1: DB/Local recommendations → Check for full rag_data first
     if (scanData) {
+      if (scanData.rag_data) {
+        return scanData.rag_data as RagData;
+      }
       return {
         health_score: scanData.quality_score ?? 50,
         ph_value: 6.5,
@@ -201,12 +221,20 @@ export default function ResultScreen() {
         field_advice: scanData.recommendations?.join("\n\n") ?? "",
       } as RagData;
     }
-    // Priority 2: URI-encoded JSON from scan.tsx navigation params
+    // Priority 2: URI-encoded JSON or direct object from scan.tsx navigation params
     if (params.ragData) {
       try {
+        if (typeof params.ragData === "object") {
+          return params.ragData as unknown as RagData;
+        }
         return JSON.parse(decodeURIComponent(params.ragData)) as RagData;
       } catch {
-        return null;
+        try {
+          return JSON.parse(params.ragData as string) as RagData;
+        } catch (e) {
+          console.warn("Failed to parse ragData parameter:", e);
+          return null;
+        }
       }
     }
     return null;
@@ -218,7 +246,9 @@ export default function ResultScreen() {
   );
   const confidence = scanData
     ? (scanData.confidence_score ?? 0)
-    : parseFloat(params.confidence ?? "0");
+    : typeof params.confidence === "number"
+      ? params.confidence
+      : parseFloat(params.confidence ?? "0");
   const imageUri =
     scanData?.image_uri ?? scanData?.image_url ?? params.imageUri ?? null;
   const isLowConfidence = params.lowConfidence === "true" || confidence < 45;
@@ -233,9 +263,18 @@ export default function ResultScreen() {
     };
   } else if (params.props) {
     try {
-      backendProps = JSON.parse(decodeURIComponent(params.props));
+      if (typeof params.props === "object") {
+        backendProps = params.props as unknown as Record<string, string>;
+      } else {
+        backendProps = JSON.parse(decodeURIComponent(params.props));
+      }
     } catch {
-      backendProps = null;
+      try {
+        backendProps = JSON.parse(params.props as string);
+      } catch (e) {
+        console.warn("Failed to parse NPK props parameter:", e);
+        backendProps = null;
+      }
     }
   }
 
@@ -288,6 +327,8 @@ export default function ResultScreen() {
       Alert.alert("Error", error.message);
     }
   };
+
+
 
   // ── pH bar ─────────────────────────────────────────────────────────────────
   const renderPhSlider = (val: number) => {
@@ -391,16 +432,21 @@ export default function ResultScreen() {
             Soil Report
           </ThemeText>
           <Text style={[styles.headerDate, { color: themeColors.subText }]}>
-            {new Date().toLocaleDateString("en-GB", {
-              day: "numeric",
-              month: "short",
-              year: "numeric",
-            })}
+            {new Date(scanData?.created_at || Date.now()).toLocaleDateString(
+              "en-GB",
+              {
+                day: "numeric",
+                month: "short",
+                year: "numeric",
+              },
+            )}
           </Text>
         </View>
-        <TouchableOpacity style={styles.headerBtn} onPress={handleShare}>
-          <Ionicons name="share-outline" size={20} color={themeColors.text} />
-        </TouchableOpacity>
+        <View style={{ flexDirection: "row", alignItems: "center" }}>
+          <TouchableOpacity style={styles.headerBtn} onPress={handleShare}>
+            <Ionicons name="share-outline" size={20} color={themeColors.text} />
+          </TouchableOpacity>
+        </View>
       </View>
 
       <ScrollView
@@ -461,14 +507,16 @@ export default function ResultScreen() {
             </View>
 
             <View style={styles.heroInfo}>
-              {classification ? (
+              {scanData?.field_name || classification ? (
                 <Text
                   style={[
                     styles.heroClassification,
                     { color: "rgba(255,255,255,0.65)" },
                   ]}
                 >
-                  {classification}
+                  {scanData?.field_name
+                    ? `${scanData.field_name}${classification ? ` • ${classification}` : ""}`
+                    : classification}
                 </Text>
               ) : null}
               <Text style={styles.heroSoilName}>{prediction}</Text>
@@ -813,6 +861,25 @@ export default function ResultScreen() {
             </View>
           )}
 
+          {/* ── FARMER NOTES ─────────────────────────────────────────── */}
+          {scanData?.notes && (
+            <EarthyCard style={styles.card}>
+              <Text style={[styles.sectionTitle, { color: themeColors.text }]}>
+                Farmer Notes
+              </Text>
+              <Text
+                style={{
+                  color: themeColors.text,
+                  fontSize: 13,
+                  lineHeight: 18,
+                  fontStyle: "italic",
+                }}
+              >
+                {"\""}{scanData.notes}{"\""}
+              </Text>
+            </EarthyCard>
+          )}
+
           {/* ── CTAs ─────────────────────────────────────────────────── */}
           <TouchableOpacity
             style={styles.scanAgainBtn}
@@ -822,6 +889,8 @@ export default function ResultScreen() {
             <Ionicons name="camera-outline" size={18} color={Colors.white} />
             <Text style={styles.scanAgainText}>Scan Another Sample</Text>
           </TouchableOpacity>
+
+
 
           <TouchableOpacity
             style={[styles.homeBtn, { borderColor: themeColors.border }]}
@@ -1285,4 +1354,20 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   homeBtnText: { fontSize: 14, fontWeight: "700" },
+  downloadReportBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: Colors.lightGreen,
+    paddingVertical: 15,
+    borderRadius: 16,
+    gap: 8,
+    marginBottom: 10,
+    shadowColor: Colors.lightGreen,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 10,
+    elevation: 6,
+  },
+  downloadReportText: { fontSize: 15, fontWeight: "800", color: Colors.white },
 });

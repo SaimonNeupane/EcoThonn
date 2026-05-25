@@ -24,6 +24,8 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { useInfer } from "../../../hooks/useInfer"; // adjust path as needed
 import { useWeather } from "../../../hooks/useWeather"; // adjust path as needed
+import { saveSoilScan, SoilScan } from "../../../services/api";
+import { useLocation } from "../../../hooks/useLocation";
 
 const { width } = Dimensions.get("window");
 
@@ -68,7 +70,8 @@ export default function ScanScreen() {
 
   // ── Hooks ──────────────────────────────────────────────────────────────────
   const { infer, loading: inferLoading, reset: resetInfer } = useInfer();
-  const { farmContext } = useWeather(); // provides location + weather context for RAG
+  const { location } = useLocation();
+  const { farmContext } = useWeather(location?.latitude, location?.longitude); // provides location + weather context for RAG
 
   const cameraRef = useRef<CameraView>(null);
   const scanLineY = useRef(new Animated.Value(0)).current;
@@ -213,6 +216,47 @@ export default function ScanScreen() {
       animateProgress(100);
 
       const formattedPrediction = data.prediction.replace(/_/g, " ");
+      const scanId = data.scan_id || `local_${Date.now()}`;
+
+      // Construct and save SoilScan locally
+      const scanObj: Partial<SoilScan> = {
+        id: scanId,
+        user_id: userId,
+        image_uri: imageUri,
+        image_url: imageUri,
+        soil_type: formattedPrediction,
+        confidence_score: data.confidence_score,
+        ph_range: data.props?.pH_range || "6.5",
+        npk_values: {
+          nitrogen: data.props?.Nitrogen_N || "Medium",
+          phosphorus: data.props?.Phosphorus_P || "Medium",
+          potassium: data.props?.Potassium_K || "Medium",
+        },
+        health_status: data.rag_data?.ph_status || "Unknown",
+        quality_score: data.rag_data?.health_score || 50,
+        recommendations: data.rag_data?.treatments || [],
+        suggested_crops: data.rag_data?.crops || [],
+        fertilizer_recommendation: data.rag_data?.npk_warning || "",
+        location: farmContext?.location ? {
+          latitude: farmContext.location.latitude ?? 27.6221,
+          longitude: farmContext.location.longitude ?? 85.5428,
+        } : undefined,
+        field_name: fieldName || undefined,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        rag_data: data.rag_data,
+      };
+
+      let savedScan: SoilScan | null = null;
+      try {
+        savedScan = await saveSoilScan(scanObj);
+      } catch (err) {
+        console.error("Failed to save scan locally:", err);
+      }
+
+      const finalImageUri = savedScan?.image_uri || imageUri;
+      const finalScanId = savedScan?.id || scanId;
+
       setTimeout(() => {
         setIsScanning(false);
         setCapturedImageUri(null);
@@ -222,15 +266,12 @@ export default function ScanScreen() {
           params: {
             prediction: formattedPrediction,
             confidence: data.confidence_score,
-            imageUri,
+            imageUri: finalImageUri,
             lowConfidence: data.low_confidence ? "true" : "false",
-            scanId: data.scan_id ?? "",
-            // Forward the full structured RAG payload so ResultScreen
-            // can render everything without a second network round-trip.
+            scanId: finalScanId,
             ragData: data.rag_data
               ? encodeURIComponent(JSON.stringify(data.rag_data))
               : "",
-            // Raw NPK props for the NPK chart bars
             props: data.props
               ? encodeURIComponent(JSON.stringify(data.props))
               : "",

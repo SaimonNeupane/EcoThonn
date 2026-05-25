@@ -7,7 +7,9 @@ import {
   Alert,
   Text,
   ActivityIndicator,
+  Image,
 } from "react-native";
+import { useRouter, useFocusEffect } from "expo-router";
 import {
   EarthyCard,
   ThemeText,
@@ -22,45 +24,42 @@ import {
   SoilScan,
 } from "../../../services/api";
 
-type TimeframeType = "7D" | "30D" | "6M";
-
 export default function AnalyticsScreen() {
+  const router = useRouter();
   const themeColors = useThemeColors();
-  const [timeframe, setTimeframe] = useState<TimeframeType>("30D");
-  const [analyticsData, setAnalyticsData] = useState<AnalyticsData | null>(
-    null,
-  );
   const [pastReports, setPastReports] = useState<SoilScan[]>([]);
   const [loading, setLoading] = useState(true);
-  const userId = "user123"; // TODO: Replace with actual user ID from auth context
+  const userId = "user123";
 
-  // Fetch analytics data and scan history from backend
+  const fetchData = async () => {
+    try {
+      setLoading(true);
+      const history = await getScanHistory(userId, 0, 10);
+      setPastReports(history);
+    } catch (error) {
+      console.error("Error fetching analytics:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
-    const fetchData = async () => {
-      try {
-        setLoading(true);
-        const analytics = await getAnalytics(userId);
-        const history = await getScanHistory(userId, 0, 10);
-
-        setAnalyticsData(analytics);
-        setPastReports(history);
-      } catch (error) {
-        console.error("Error fetching analytics:", error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
     fetchData();
   }, []);
 
-  // Transform NPK data from analytics
-  const getNPKData = () => {
-    if (!pastReports || pastReports.length === 0) {
-      return [];
-    }
+  // Refresh history when page is focused
+  useFocusEffect(
+    React.useCallback(() => {
+      fetchData();
+    }, [])
+  );
 
-    return pastReports.slice(0, 3).map((report, idx) => ({
+  // Transform NPK data from the previous 3 scans only
+  const getNPKData = () => {
+    const subset = pastReports.slice(0, 3);
+    if (subset.length < 3) return [];
+
+    return subset.map((report, idx) => ({
       sector: report.field_name || `Field ${idx + 1}`,
       N: parseInt(report.npk_values?.nitrogen?.match(/\d+/)?.[0] || "50"),
       P: parseInt(report.npk_values?.phosphorus?.match(/\d+/)?.[0] || "50"),
@@ -68,44 +67,101 @@ export default function AnalyticsScreen() {
     }));
   };
 
+  // Sector performance matrix from the previous 3 scans only
+  const getSectorPerformance = () => {
+    const subset = pastReports.slice(0, 3);
+    if (subset.length < 3) return [];
+
+    const sectors: Record<
+      string,
+      { scores: number[]; phs: number[]; latestScore: number; prevScore: number }
+    > = {};
+
+    const sorted = [...subset].sort(
+      (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+    );
+
+    sorted.forEach((scan) => {
+      const field = scan.field_name || scan.soil_type || "Unknown Sector";
+      if (!sectors[field]) {
+        sectors[field] = { scores: [], phs: [], latestScore: 0, prevScore: 0 };
+      }
+
+      const phVal = parseFloat(scan.ph_range || "6.5");
+      const scoreVal = scan.quality_score ?? 50;
+
+      sectors[field].scores.push(scoreVal);
+      sectors[field].phs.push(phVal);
+      sectors[field].prevScore = sectors[field].latestScore;
+      sectors[field].latestScore = scoreVal;
+    });
+
+    return Object.entries(sectors).map(([name, data]) => {
+      const avgScore = Math.round(
+        data.scores.reduce((sum, s) => sum + s, 0) / data.scores.length
+      );
+      const avgPhVal =
+        data.phs.reduce((sum, p) => sum + p, 0) / data.phs.length;
+      const avgPh = isNaN(avgPhVal) ? "—" : avgPhVal.toFixed(1);
+      const trend =
+        data.latestScore >= (data.prevScore || data.latestScore)
+          ? "up"
+          : "down";
+
+      return {
+        name,
+        score: avgScore,
+        ph: avgPh,
+        trend,
+      };
+    });
+  };
+
+  // Generate dynamic trend advisory from the last 3 scans
+  const getTrendAdvisory = () => {
+    const subset = pastReports.slice(0, 3);
+    if (subset.length < 3) return null;
+
+    const latest = subset[0];
+    const oldest = subset[subset.length - 1];
+
+    const latestScore = latest.quality_score ?? 50;
+    const oldestScore = oldest.quality_score ?? 50;
+    const diff = latestScore - oldestScore;
+    const trendSign = diff >= 0 ? "+" : "";
+
+    const totalPh = subset.reduce((sum, s) => sum + parseFloat(s.ph_range || "6.5"), 0);
+    const avgPh = (totalPh / subset.length).toFixed(1);
+
+    const trendText = `Soil health scores show a ${diff >= 0 ? "upward" : "downward"} trajectory of ${trendSign}${diff}% over your previous 3 scans. Average pH is stabilized around ${avgPh}.`;
+
+    return {
+      diffPercent: `${trendSign}${diff}%`,
+      avgPh,
+      trendLabel: diff >= 0 ? "Health ↑" : "Health ↓",
+      text: trendText,
+      topSector: latest.field_name || latest.soil_type,
+    };
+  };
+
+  const trendAdvisory = getTrendAdvisory();
+
   const NPK_COLORS = {
     N: "#4CAF7D",
     P: "#F5A623",
     K: "#5B8DEF",
   };
 
-  const handleExportAll = () => {
-    Alert.alert("Export Data", "Format for export:", [
-      {
-        text: "CSV Spreadsheet",
-        onPress: () =>
-          Alert.alert("Exported", "CSV file compiled and sent to your email."),
-      },
-      {
-        text: "PDF Summary Pack",
-        onPress: () =>
-          Alert.alert("Exported", "PDF summary reports downloaded."),
-      },
-      { text: "Cancel" },
-    ]);
-  };
 
-  // NPK grouped bar chart
+
   const renderNPKChart = () => {
     const npkData = getNPKData();
     const maxVal = 100;
 
-    if (npkData.length === 0) {
-      return (
-        <View style={{ padding: 20, alignItems: "center" }}>
-          <ThemeText category="body">No scan data available yet</ThemeText>
-        </View>
-      );
-    }
+    if (npkData.length === 0) return null;
 
     return (
       <View>
-        {/* Legend */}
         <View style={styles.npkLegend}>
           {(["N", "P", "K"] as const).map((key) => (
             <View key={key} style={styles.npkLegendItem}>
@@ -128,7 +184,6 @@ export default function AnalyticsScreen() {
           ))}
         </View>
 
-        {/* Chart */}
         <View style={styles.npkChartOuter}>
           <View style={styles.npkYAxis}>
             {["100", "75", "50", "25", "0"].map((v) => (
@@ -159,6 +214,7 @@ export default function AnalyticsScreen() {
                 })}
                 <Text
                   style={[styles.npkSectorLabel, { color: themeColors.text }]}
+                  numberOfLines={1}
                 >
                   {sector.sector}
                 </Text>
@@ -175,319 +231,272 @@ export default function AnalyticsScreen() {
       {/* HEADER */}
       <View style={[styles.header, { borderBottomColor: themeColors.border }]}>
         <ThemeText category="h2">Farm Analytics</ThemeText>
-        <TouchableOpacity
-          style={[
-            styles.exportBtn,
-            {
-              backgroundColor: themeColors.card,
-              borderColor: themeColors.border,
-            },
-          ]}
-          onPress={handleExportAll}
-        >
-          <Ionicons
-            name="cloud-upload-outline"
-            size={16}
-            color={Colors.darkGreen}
-          />
-          <ThemeText category="caption" style={styles.exportBtnText}>
-            Export
-          </ThemeText>
-        </TouchableOpacity>
       </View>
 
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
       >
-        {/* TIMEFRAME SELECTOR BAR */}
-        <View style={styles.timeframeSelector}>
-          {(["7D", "30D", "6M"] as TimeframeType[]).map((tf) => (
-            <TouchableOpacity
-              key={tf}
-              style={[
-                styles.tfBtn,
-                timeframe === tf
-                  ? { backgroundColor: Colors.darkGreen }
-                  : {
-                      backgroundColor: themeColors.card,
-                      borderColor: themeColors.border,
-                      borderWidth: 1,
-                    },
-              ]}
-              onPress={() => setTimeframe(tf)}
-            >
-              <Text
-                style={[
-                  styles.tfText,
-                  timeframe === tf
-                    ? { color: Colors.white }
-                    : { color: themeColors.text },
-                ]}
-              >
-                {tf === "7D" ? "7 Days" : tf === "30D" ? "30 Days" : "6 Months"}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-
-        {/* SMART TREND INSIGHT CARD — improved */}
-        <EarthyCard style={styles.trendAdvisoryCard}>
-          {/* Top accent bar */}
-          <View style={styles.trendAccentBar} />
-          <View style={styles.trendAdvisoryInner}>
-            <View style={styles.trendAdvisoryTitle}>
-              <View style={styles.trendIconCircle}>
-                <Ionicons
-                  name="trending-up"
-                  size={16}
-                  color={Colors.darkGreen}
-                />
-              </View>
-              <ThemeText
-                category="bodyBold"
-                style={{
-                  marginLeft: 10,
-                  color: Colors.darkGreen,
-                  fontSize: 14,
-                }}
-              >
-                Soil Improvement Trends
-              </ThemeText>
-            </View>
-
-            <ThemeText category="body" style={styles.trendAdvisoryText}>
-              Soil health scores show an upward trajectory of{" "}
-              <ThemeText
-                category="bodyBold"
-                style={{ color: Colors.darkGreen }}
-              >
-                +8.4% since March
-              </ThemeText>{" "}
-              due to active organic treatments in Sector A. pH has stabilized
-              within the ideal 6.4–6.5 range.
-            </ThemeText>
-
-            {/* Stat pills */}
-            <View style={styles.trendStatRow}>
-              <View style={styles.trendStatPill}>
-                <Text style={styles.trendStatValue}>+8.4%</Text>
-                <Text style={styles.trendStatLabel}>Health ↑</Text>
-              </View>
-              <View style={styles.trendStatPill}>
-                <Text style={styles.trendStatValue}>6.5</Text>
-                <Text style={styles.trendStatLabel}>pH Stable</Text>
-              </View>
-              <View style={styles.trendStatPill}>
-                <Text style={styles.trendStatValue}>Sector A</Text>
-                <Text style={styles.trendStatLabel}>Top Zone</Text>
-              </View>
-            </View>
-          </View>
-        </EarthyCard>
-
-        {/* NPK GRAPH CARD */}
-        <EarthyCard style={styles.graphCard}>
-          <View style={styles.graphCardHeader}>
-            <View>
-              <ThemeText category="h3">NPK Nutrient Levels</ThemeText>
-              <ThemeText category="caption">
-                Per-sector macronutrient breakdown
-              </ThemeText>
-            </View>
-          </View>
-          {renderNPKChart()}
-        </EarthyCard>
-
-        {/* COMPARISON METRICS SECTION */}
-        <ThemeText category="h3" style={styles.sectionTitle}>
-          Sector Performance Matrix
-        </ThemeText>
-        <EarthyCard style={styles.performanceCard}>
-          <View style={styles.perfGridHeader}>
-            <View style={styles.gridColName}>
-              <ThemeText category="caption" style={{ fontWeight: "700" }}>
-                Sector
-              </ThemeText>
-            </View>
-            <View style={styles.gridColScore}>
-              <ThemeText category="caption" style={{ fontWeight: "700" }}>
-                Score
-              </ThemeText>
-            </View>
-            <View style={styles.gridColPh}>
-              <ThemeText category="caption" style={{ fontWeight: "700" }}>
-                pH
-              </ThemeText>
-            </View>
-            <View style={styles.gridColTrend}>
-              <ThemeText category="caption" style={{ fontWeight: "700" }}>
-                Trend
-              </ThemeText>
-            </View>
-          </View>
-
-          <View style={styles.perfGridRow}>
-            <View style={styles.gridColName}>
-              <ThemeText category="bodyBold">North Field (A)</ThemeText>
-            </View>
-            <View style={styles.gridColScore}>
-              <ThemeText
-                category="body"
-                style={{ color: Colors.lightGreen, fontWeight: "700" }}
-              >
-                85%
-              </ThemeText>
-            </View>
-            <View style={styles.gridColPh}>
-              <ThemeText category="body">6.5</ThemeText>
-            </View>
-            <View style={styles.gridColTrend}>
-              <Ionicons name="arrow-up" size={16} color={Colors.lightGreen} />
-            </View>
-          </View>
-
-          <View style={styles.perfGridRow}>
-            <View style={styles.gridColName}>
-              <ThemeText category="bodyBold">East Meadow (B)</ThemeText>
-            </View>
-            <View style={styles.gridColScore}>
-              <ThemeText
-                category="body"
-                style={{ color: Colors.accentYellow, fontWeight: "700" }}
-              >
-                72%
-              </ThemeText>
-            </View>
-            <View style={styles.gridColPh}>
-              <ThemeText category="body">6.1</ThemeText>
-            </View>
-            <View style={styles.gridColTrend}>
-              <Ionicons name="arrow-up" size={16} color={Colors.lightGreen} />
-            </View>
-          </View>
-
-          <View style={styles.perfGridRow}>
-            <View style={styles.gridColName}>
-              <ThemeText category="bodyBold">Orchard Hill (C)</ThemeText>
-            </View>
-            <View style={styles.gridColScore}>
-              <ThemeText
-                category="body"
-                style={{ color: Colors.accentOrange, fontWeight: "700" }}
-              >
-                48%
-              </ThemeText>
-            </View>
-            <View style={styles.gridColPh}>
-              <ThemeText category="body">5.4</ThemeText>
-            </View>
-            <View style={styles.gridColTrend}>
-              <Ionicons
-                name="trending-down"
-                size={16}
-                color={Colors.accentOrange}
-              />
-            </View>
-          </View>
-        </EarthyCard>
-
-        {/* LOGGED REPORTS DATABASE */}
-        <View style={styles.reportsHeaderRow}>
-          <ThemeText category="h3" style={styles.sectionTitle}>
-            Previous Soil Scans
-          </ThemeText>
-          <ThemeText
-            category="caption"
-            style={{ color: Colors.darkGreen, fontWeight: "700" }}
-          >
-            {pastReports.length} Reports
-          </ThemeText>
-        </View>
 
         {loading ? (
-          <View style={{ padding: 20, alignItems: "center" }}>
-            <ActivityIndicator size="small" color={Colors.darkGreen} />
+          <View style={{ paddingVertical: 40, alignItems: "center" }}>
+            <ActivityIndicator size="large" color={Colors.darkGreen} />
+            <ThemeText category="body" style={{ marginTop: 12 }}>Loading telemetry metrics...</ThemeText>
           </View>
-        ) : pastReports.length === 0 ? (
-          <EarthyCard style={styles.reportRowCard}>
-            <ThemeText category="body" style={{ textAlign: "center" }}>
-              No scan reports yet
+        ) : pastReports.length < 3 ? (
+          /* Graceful Empty State Card when less than 3 scans exist */
+          <EarthyCard style={styles.emptyContainer}>
+            <View style={styles.emptyIconCircle}>
+              <Ionicons name="bar-chart" size={32} color={Colors.darkGreen} />
+            </View>
+            <ThemeText category="h2" style={styles.emptyTitle}>
+              Insufficient Scans
             </ThemeText>
+            <ThemeText category="body" style={styles.emptyText}>
+              To analyze nutrient progress, sector comparison indexes, and trend charts, SoilSense AI requires at least 3 scans. Currently, you have completed {pastReports.length} / 3 scans.
+            </ThemeText>
+            <TouchableOpacity style={styles.emptyBtn} onPress={() => router.replace("/root/tab/scan")}>
+              <Text style={styles.emptyBtnText}>Scan Soil Now</Text>
+            </TouchableOpacity>
           </EarthyCard>
         ) : (
-          pastReports.map((report, index) => (
-            <View key={report.id || `report-${index}`}>
-              <EarthyCard style={styles.reportRowCard}>
-                <View style={styles.reportRowLeft}>
-                  <View style={styles.reportIconCircle}>
-                    <Ionicons
-                      name="document-text-outline"
-                      size={20}
-                      color={Colors.darkGreen}
-                    />
-                  </View>
-                  <View style={{ marginLeft: 12 }}>
-                    <ThemeText category="bodyBold">
-                      {report.field_name || report.soil_type}
-                    </ThemeText>
-                    <ThemeText category="caption">
-                      {report.soil_type} •{" "}
-                      {new Date(report.created_at).toLocaleDateString()}
-                    </ThemeText>
-                  </View>
-                </View>
-
-                <View style={styles.reportRowRight}>
-                  <View
-                    style={[
-                      styles.reportScoreBadge,
-                      {
-                        backgroundColor:
-                          (report.quality_score || 0) >= 80
-                            ? Colors.lightGreen + "15"
-                            : (report.quality_score || 0) >= 60
-                              ? "#FFB30015"
-                              : "#FF704315",
-                      },
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.reportScoreText,
-                        {
-                          color:
-                            (report.quality_score || 0) >= 80
-                              ? Colors.darkGreen
-                              : (report.quality_score || 0) >= 60
-                                ? "#FFB300"
-                                : "#FF7043",
-                        },
-                      ]}
+          /* Real Data Analytics Display */
+          <>
+            {trendAdvisory && (
+              <EarthyCard style={styles.trendAdvisoryCard}>
+                <View style={styles.trendAccentBar} />
+                <View style={styles.trendAdvisoryInner}>
+                  <View style={styles.trendAdvisoryTitle}>
+                    <View style={styles.trendIconCircle}>
+                      <Ionicons
+                        name="trending-up"
+                        size={16}
+                        color={Colors.darkGreen}
+                      />
+                    </View>
+                    <ThemeText
+                      category="bodyBold"
+                      style={{
+                        marginLeft: 10,
+                        color: Colors.darkGreen,
+                        fontSize: 14,
+                      }}
                     >
-                      {Math.round(report.quality_score || 0)}%
-                    </Text>
+                      Soil Improvement Trends
+                    </ThemeText>
                   </View>
 
-                  <TouchableOpacity
-                    style={styles.downloadRowBtn}
-                    onPress={() =>
-                      Alert.alert(
-                        "Download",
-                        `Downloading full report PDF for ${report.field_name || report.soil_type}`,
-                      )
-                    }
-                  >
-                    <Ionicons
-                      name="download-outline"
-                      size={18}
-                      color={themeColors.text}
-                    />
-                  </TouchableOpacity>
+                  <ThemeText category="body" style={styles.trendAdvisoryText}>
+                    {trendAdvisory.text}
+                  </ThemeText>
+
+                  <View style={styles.trendStatRow}>
+                    <View style={styles.trendStatPill}>
+                      <Text style={styles.trendStatValue}>{trendAdvisory.diffPercent}</Text>
+                      <Text style={styles.trendStatLabel}>{trendAdvisory.trendLabel}</Text>
+                    </View>
+                    <View style={styles.trendStatPill}>
+                      <Text style={styles.trendStatValue}>{trendAdvisory.avgPh}</Text>
+                      <Text style={styles.trendStatLabel}>pH Avg</Text>
+                    </View>
+                    <View style={styles.trendStatPill}>
+                      <Text style={styles.trendStatValue} numberOfLines={1}>{trendAdvisory.topSector}</Text>
+                      <Text style={styles.trendStatLabel}>Latest Sector</Text>
+                    </View>
+                  </View>
                 </View>
               </EarthyCard>
+            )}
+
+            <EarthyCard style={styles.graphCard}>
+              <View style={styles.graphCardHeader}>
+                <View>
+                  <ThemeText category="h3">NPK Nutrient Levels</ThemeText>
+                  <ThemeText category="caption">
+                    Macronutrient breakdown from last 3 scans
+                  </ThemeText>
+                </View>
+              </View>
+              {renderNPKChart()}
+            </EarthyCard>
+
+            <ThemeText category="h3" style={styles.sectionTitle}>
+              Sector Performance Matrix
+            </ThemeText>
+            <EarthyCard style={styles.performanceCard}>
+              <View style={styles.perfGridHeader}>
+                <View style={styles.gridColName}>
+                  <ThemeText category="caption" style={{ fontWeight: "700" }}>
+                    Sector
+                  </ThemeText>
+                </View>
+                <View style={styles.gridColScore}>
+                  <ThemeText category="caption" style={{ fontWeight: "700" }}>
+                    Score
+                  </ThemeText>
+                </View>
+                <View style={styles.gridColPh}>
+                  <ThemeText category="caption" style={{ fontWeight: "700" }}>
+                    pH
+                  </ThemeText>
+                </View>
+                <View style={styles.gridColTrend}>
+                  <ThemeText category="caption" style={{ fontWeight: "700" }}>
+                    Trend
+                  </ThemeText>
+                </View>
+              </View>
+
+              {getSectorPerformance().map((sector, i) => {
+                const scoreColor =
+                  sector.score >= 80
+                    ? Colors.lightGreen
+                    : sector.score >= 60
+                      ? Colors.accentYellow
+                      : Colors.accentOrange;
+
+                return (
+                  <View key={i} style={styles.perfGridRow}>
+                    <View style={styles.gridColName}>
+                      <ThemeText category="bodyBold" numberOfLines={1}>{sector.name}</ThemeText>
+                    </View>
+                    <View style={styles.gridColScore}>
+                      <ThemeText
+                        category="body"
+                        style={{ color: scoreColor, fontWeight: "700" }}
+                      >
+                        {sector.score}%
+                      </ThemeText>
+                    </View>
+                    <View style={styles.gridColPh}>
+                      <ThemeText category="body">{sector.ph}</ThemeText>
+                    </View>
+                    <View style={styles.gridColTrend}>
+                      <Ionicons
+                        name={sector.trend === "up" ? "arrow-up" : "trending-down"}
+                        size={16}
+                        color={sector.trend === "up" ? Colors.lightGreen : Colors.accentOrange}
+                      />
+                    </View>
+                  </View>
+                );
+              })}
+            </EarthyCard>
+          </>
+        )}
+
+        {/* LOGGED REPORTS DATABASE (Available at all times for real reports) */}
+        {!loading && (
+          <>
+            <View style={styles.reportsHeaderRow}>
+              <ThemeText category="h3" style={styles.sectionTitle}>
+                Previous Soil Scans
+              </ThemeText>
+              <ThemeText
+                category="caption"
+                style={{ color: Colors.darkGreen, fontWeight: "700" }}
+              >
+                {pastReports.length} Reports
+              </ThemeText>
             </View>
-          ))
+
+            {pastReports.length === 0 ? (
+              <EarthyCard style={styles.reportRowCard}>
+                <ThemeText category="body" style={{ textAlign: "center" }}>
+                  No scan reports yet
+                </ThemeText>
+              </EarthyCard>
+            ) : (
+              pastReports.map((report, index) => {
+                const imageUri = report.image_uri || report.image_url;
+                return (
+                  <View key={report.id || `report-${index}`}>
+                    <EarthyCard
+                      style={styles.reportRowCard}
+                      onPress={() => {
+                        router.push(`/result?scanId=${report.id}`);
+                      }}
+                    >
+                      <View style={styles.reportRowLeft}>
+                        <View style={styles.reportIconCircle}>
+                          {imageUri ? (
+                            <Image
+                              source={{ uri: imageUri }}
+                              style={styles.reportRowImage}
+                              resizeMode="cover"
+                            />
+                          ) : (
+                            <Ionicons
+                              name="document-text-outline"
+                              size={20}
+                              color={Colors.darkGreen}
+                            />
+                          )}
+                        </View>
+                        <View style={{ marginLeft: 12, flex: 1 }}>
+                          <ThemeText category="bodyBold" numberOfLines={1}>
+                            {report.field_name || report.soil_type}
+                          </ThemeText>
+                          <ThemeText category="caption" numberOfLines={1}>
+                            {report.soil_type} •{" "}
+                            {new Date(report.created_at).toLocaleDateString()}
+                          </ThemeText>
+                        </View>
+                      </View>
+
+                      <View style={styles.reportRowRight}>
+                        <View
+                          style={[
+                            styles.reportScoreBadge,
+                            {
+                              backgroundColor:
+                                (report.quality_score || 0) >= 80
+                                  ? Colors.lightGreen + "15"
+                                  : (report.quality_score || 0) >= 60
+                                    ? "#FFB30015"
+                                    : "#FF704315",
+                            },
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              styles.reportScoreText,
+                              {
+                                color:
+                                  (report.quality_score || 0) >= 80
+                                    ? Colors.darkGreen
+                                    : (report.quality_score || 0) >= 60
+                                      ? "#FFB300"
+                                      : "#FF7043",
+                              },
+                            ]}
+                          >
+                            {Math.round(report.quality_score || 0)}%
+                          </Text>
+                        </View>
+
+                        <TouchableOpacity
+                          style={styles.downloadRowBtn}
+                          onPress={() =>
+                            Alert.alert(
+                              "Download",
+                              `Downloading full report PDF for ${report.field_name || report.soil_type}`
+                            )
+                          }
+                        >
+                          <Ionicons
+                            name="download-outline"
+                            size={18}
+                            color={themeColors.text}
+                          />
+                        </TouchableOpacity>
+                      </View>
+                    </EarthyCard>
+                  </View>
+                );
+              })
+            )}
+          </>
         )}
       </ScrollView>
     </View>
@@ -542,7 +551,7 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
 
-  // ── Trend Advisory Card (improved) ──────────────────────────────────────────
+  // Trend Advisory Card
   trendAdvisoryCard: {
     overflow: "hidden",
     borderRadius: 18,
@@ -599,7 +608,7 @@ const styles = StyleSheet.create({
     borderColor: Colors.darkGreen + "20",
   },
   trendStatValue: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: "800",
     color: Colors.darkGreen,
   },
@@ -611,7 +620,7 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
 
-  // ── Graph / NPK Card ─────────────────────────────────────────────────────────
+  // Graph / NPK Card
   graphCard: {
     borderRadius: 20,
     padding: 16,
@@ -696,15 +705,15 @@ const styles = StyleSheet.create({
   npkSectorLabel: {
     position: "absolute",
     bottom: 0,
-    left: -4,
-    right: -4,
+    left: -8,
+    right: -8,
     textAlign: "center",
     fontSize: 8,
     fontWeight: "700",
     opacity: 0.6,
   },
 
-  // ── Performance Matrix ───────────────────────────────────────────────────────
+  // Performance Matrix
   sectionTitle: {
     fontWeight: "800",
     marginVertical: 12,
@@ -743,11 +752,12 @@ const styles = StyleSheet.create({
     alignItems: "flex-end",
   },
 
-  // ── Reports ──────────────────────────────────────────────────────────────────
+  // Reports
   reportsHeaderRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
+    marginTop: 12,
   },
   reportRowCard: {
     flexDirection: "row",
@@ -760,6 +770,7 @@ const styles = StyleSheet.create({
   reportRowLeft: {
     flexDirection: "row",
     alignItems: "center",
+    flex: 1,
   },
   reportIconCircle: {
     width: 36,
@@ -768,6 +779,11 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.lightGreen + "15",
     alignItems: "center",
     justifyContent: "center",
+    overflow: "hidden",
+  },
+  reportRowImage: {
+    width: "100%",
+    height: "100%",
   },
   reportRowRight: {
     flexDirection: "row",
@@ -785,5 +801,50 @@ const styles = StyleSheet.create({
   },
   downloadRowBtn: {
     padding: 4,
+  },
+
+  // Empty State Styles
+  emptyContainer: {
+    padding: 24,
+    borderRadius: 24,
+    alignItems: "center",
+    marginVertical: 20,
+    backgroundColor: Colors.white,
+  },
+  emptyIconCircle: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: Colors.lightGreen + "15",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 16,
+  },
+  emptyTitle: {
+    fontSize: 20,
+    fontWeight: "800",
+    color: Colors.darkGreen,
+    marginBottom: 8,
+  },
+  emptyText: {
+    fontSize: 13,
+    color: Colors.textSecondary,
+    textAlign: "center",
+    lineHeight: 20,
+    marginBottom: 20,
+    paddingHorizontal: 8,
+  },
+  emptyBtn: {
+    backgroundColor: Colors.darkGreen,
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 12,
+    width: "100%",
+    alignItems: "center",
+  },
+  emptyBtnText: {
+    color: Colors.white,
+    fontWeight: "700",
+    fontSize: 14,
   },
 });
