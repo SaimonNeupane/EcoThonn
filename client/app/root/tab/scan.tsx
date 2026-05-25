@@ -9,8 +9,8 @@ import {
   StatusBar,
   Image,
   Dimensions,
-
-  Text
+  TextInput,
+  Text,
 } from "react-native";
 import { useRouter } from "expo-router";
 import { CameraView, useCameraPermissions, FlashMode } from "expo-camera";
@@ -24,7 +24,7 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 
 const { width } = Dimensions.get("window");
-const BACKEND_URL = "http://192.168.76.201:8000/infer";
+const BACKEND_URL = "http://192.168.76.203:8000/infer";
 
 type FlashState = "off" | "on" | "auto";
 
@@ -62,6 +62,9 @@ export default function ScanScreen() {
   const [capturedImageUri, setCapturedImageUri] = useState<string | null>(null);
   const [cameraReady, setCameraReady] = useState(false);
   const [showFlashHint, setShowFlashHint] = useState(false);
+  const [fieldName, setFieldName] = useState("");
+  const [showFieldInput, setShowFieldInput] = useState(false);
+  const userId = "user123"; // TODO: Replace with actual user ID from auth context
 
   const cameraRef = useRef<CameraView>(null);
   const scanLineY = useRef(new Animated.Value(0)).current;
@@ -86,7 +89,7 @@ export default function ScanScreen() {
             duration: 2000,
             useNativeDriver: true,
           }),
-        ])
+        ]),
       );
       loop.start();
       return () => loop.stop();
@@ -108,7 +111,7 @@ export default function ScanScreen() {
         useNativeDriver: false,
       }).start();
     },
-    [progressAnim]
+    [progressAnim],
   );
 
   const cycleStepText = useCallback(() => {
@@ -134,8 +137,16 @@ export default function ScanScreen() {
 
   const pulseCapture = useCallback(() => {
     Animated.sequence([
-      Animated.timing(captureRing, { toValue: 1.18, duration: 100, useNativeDriver: true }),
-      Animated.timing(captureRing, { toValue: 1, duration: 100, useNativeDriver: true }),
+      Animated.timing(captureRing, {
+        toValue: 1.18,
+        duration: 100,
+        useNativeDriver: true,
+      }),
+      Animated.timing(captureRing, {
+        toValue: 1,
+        duration: 100,
+        useNativeDriver: true,
+      }),
     ]).start();
   }, [captureRing]);
 
@@ -179,13 +190,22 @@ export default function ScanScreen() {
 
         animateProgress(55);
 
-        const response = await fetch(BACKEND_URL, {
+        // Add userId and fieldName parameters
+        const params = new URLSearchParams();
+        params.append("user_id", userId);
+        if (fieldName) {
+          params.append("field_name", fieldName);
+        }
+
+        const response = await fetch(`${BACKEND_URL}?${params.toString()}`, {
           method: "POST",
           body: formData,
         });
 
         if (!response.ok) {
-          throw new Error(`Server error ${response.status}. Check your connection.`);
+          throw new Error(
+            `Server error ${response.status}. Check your connection.`,
+          );
         }
 
         const data = await response.json();
@@ -193,9 +213,14 @@ export default function ScanScreen() {
 
         animateProgress(90);
 
-        if (!data.success || !data.prediction || data.prediction === "Unknown") {
+        if (
+          !data.success ||
+          !data.prediction ||
+          data.prediction === "Unknown"
+        ) {
           throw new Error(
-            data.error || "Could not identify the soil type. Try better lighting or a closer shot."
+            data.error ||
+              "Could not identify the soil type. Try better lighting or a closer shot.",
           );
         }
 
@@ -217,6 +242,7 @@ export default function ScanScreen() {
               confidence: data.confidence_score,
               imageUri: imageUri,
               lowConfidence: data.low_confidence ? "true" : "false",
+              scanId: data.scan_id || "",
             },
           });
         }, 900);
@@ -224,7 +250,8 @@ export default function ScanScreen() {
         console.error("Inference Error:", error);
         resetScanState();
 
-        const msg: string = error.message ?? "Something went wrong. Please try again.";
+        const msg: string =
+          error.message ?? "Something went wrong. Please try again.";
 
         // Distinguish network errors from model errors
         const isNetworkError =
@@ -240,18 +267,26 @@ export default function ScanScreen() {
           [
             {
               text: "Try Again",
-              onPress: () => { },
+              onPress: () => {},
             },
             {
               text: "Pick Different Image",
               onPress: pickFromGallery,
               style: "default",
             },
-          ]
+          ],
         );
       }
     },
-    [animateProgress, cycleStepText, overlayAnim, resetScanState, router]
+    [
+      animateProgress,
+      cycleStepText,
+      overlayAnim,
+      resetScanState,
+      router,
+      userId,
+      fieldName,
+    ],
   );
 
   const takePicture = useCallback(async () => {
@@ -275,7 +310,10 @@ export default function ScanScreen() {
   const pickFromGallery = useCallback(async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== "granted") {
-      Alert.alert("Permission Required", "Allow photo library access in Settings.");
+      Alert.alert(
+        "Permission Required",
+        "Allow photo library access in Settings.",
+      );
       return;
     }
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -305,7 +343,12 @@ export default function ScanScreen() {
   // ── Permission loading ────────────────────────────────────────────────────
   if (!cameraPermission) {
     return (
-      <View style={[styles.permissionContainer, { backgroundColor: themeColors.bg }]}>
+      <View
+        style={[
+          styles.permissionContainer,
+          { backgroundColor: themeColors.bg },
+        ]}
+      >
         <AILoadingAnimation size={60} />
         <ThemeText category="body" style={{ marginTop: 16 }}>
           Loading camera…
@@ -317,7 +360,12 @@ export default function ScanScreen() {
   // ── Permission denied ────────────────────────────────────────────────────
   if (!cameraPermission.granted) {
     return (
-      <View style={[styles.permissionContainer, { backgroundColor: themeColors.bg }]}>
+      <View
+        style={[
+          styles.permissionContainer,
+          { backgroundColor: themeColors.bg },
+        ]}
+      >
         <View style={styles.permissionIconRing}>
           <Ionicons name="camera-outline" size={52} color={Colors.darkGreen} />
         </View>
@@ -384,7 +432,7 @@ export default function ScanScreen() {
           onPress={() =>
             Alert.alert(
               "📸 Scan Tips",
-              "• Hold camera 20–30 cm above soil\n• Use even, natural lighting\n• Fill the frame with the sample\n• Avoid shadows and glare\n• Keep camera steady when shooting"
+              "• Hold camera 20–30 cm above soil\n• Use even, natural lighting\n• Fill the frame with the sample\n• Avoid shadows and glare\n• Keep camera steady when shooting",
             )
           }
         >
@@ -412,8 +460,14 @@ export default function ScanScreen() {
           {/* Flash hint toast */}
           {showFlashHint && (
             <Animated.View style={styles.flashHint}>
-              <Ionicons name={FLASH_ICONS[flash]} size={13} color={Colors.white} />
-              <Text style={styles.flashHintText}>Flash {FLASH_LABELS[flash]}</Text>
+              <Ionicons
+                name={FLASH_ICONS[flash]}
+                size={13}
+                color={Colors.white}
+              />
+              <Text style={styles.flashHintText}>
+                Flash {FLASH_LABELS[flash]}
+              </Text>
             </Animated.View>
           )}
 
@@ -432,7 +486,10 @@ export default function ScanScreen() {
 
             {/* Animated scan line */}
             <Animated.View
-              style={[styles.scanLine, { transform: [{ translateY: scanLineY }] }]}
+              style={[
+                styles.scanLine,
+                { transform: [{ translateY: scanLineY }] },
+              ]}
             />
           </View>
 
@@ -443,6 +500,31 @@ export default function ScanScreen() {
               Center soil sample · 20–30 cm away
             </Text>
           </View>
+
+          {/* Field name input toggle */}
+          {showFieldInput && (
+            <View
+              style={[
+                styles.fieldInputCard,
+                {
+                  backgroundColor: themeColors.card,
+                  borderColor: themeColors.border,
+                },
+              ]}
+            >
+              <TextInput
+                style={[styles.fieldInput, { color: themeColors.text }]}
+                placeholder="Enter field name (optional)"
+                placeholderTextColor={themeColors.subText}
+                value={fieldName}
+                onChangeText={setFieldName}
+                maxLength={50}
+              />
+              <TouchableOpacity onPress={() => setShowFieldInput(false)}>
+                <Ionicons name="close" size={20} color={themeColors.text} />
+              </TouchableOpacity>
+            </View>
+          )}
 
           {/* ── CONTROLS ─────────────────────────────────────────────── */}
           <View style={styles.controlsRow}>
@@ -460,10 +542,16 @@ export default function ScanScreen() {
 
             {/* Capture */}
             <Animated.View
-              style={[styles.captureBtnOuter, { transform: [{ scale: captureRing }] }]}
+              style={[
+                styles.captureBtnOuter,
+                { transform: [{ scale: captureRing }] },
+              ]}
             >
               <TouchableOpacity
-                style={[styles.captureBtnInner, !cameraReady && styles.captureBtnDisabled]}
+                style={[
+                  styles.captureBtnInner,
+                  !cameraReady && styles.captureBtnDisabled,
+                ]}
                 onPress={takePicture}
                 activeOpacity={0.85}
                 disabled={!cameraReady}
@@ -478,7 +566,10 @@ export default function ScanScreen() {
 
             {/* Flash */}
             <TouchableOpacity
-              style={[styles.sideBtn, flash === "on" && styles.sideBtnFlashActive]}
+              style={[
+                styles.sideBtn,
+                flash === "on" && styles.sideBtnFlashActive,
+              ]}
               onPress={cycleFlash}
               activeOpacity={0.75}
             >
@@ -505,16 +596,52 @@ export default function ScanScreen() {
             </TouchableOpacity>
           </View>
 
+          {/* Field name toggle button */}
+          <TouchableOpacity
+            style={[
+              styles.fieldToggleBtn,
+              {
+                backgroundColor: themeColors.card,
+                borderColor: themeColors.border,
+              },
+            ]}
+            onPress={() => setShowFieldInput(!showFieldInput)}
+          >
+            <Ionicons name="text-outline" size={16} color={Colors.darkGreen} />
+            <Text
+              style={{
+                color: Colors.darkGreen,
+                fontSize: 12,
+                fontWeight: "600",
+              }}
+            >
+              {fieldName ? "✓ " + fieldName : "Add Field"}
+            </Text>
+          </TouchableOpacity>
+
           {/* Flip camera */}
-          <TouchableOpacity style={styles.flipBtn} onPress={flipCamera} activeOpacity={0.75}>
+          <TouchableOpacity
+            style={styles.flipBtn}
+            onPress={flipCamera}
+            activeOpacity={0.75}
+          >
             <View style={styles.flipBtnInner}>
-              <Ionicons name="camera-reverse-outline" size={19} color={Colors.white} />
+              <Ionicons
+                name="camera-reverse-outline"
+                size={19}
+                color={Colors.white}
+              />
             </View>
           </TouchableOpacity>
         </View>
       ) : (
         // ── AI ANALYZING STATE ─────────────────────────────────────────
-        <View style={[styles.analyzingContainer, { backgroundColor: themeColors.bg }]}>
+        <View
+          style={[
+            styles.analyzingContainer,
+            { backgroundColor: themeColors.bg },
+          ]}
+        >
           {/* Soil image thumbnail */}
           {capturedImageUri && (
             <View style={styles.thumbnailCard}>
@@ -525,14 +652,21 @@ export default function ScanScreen() {
               />
               <View style={styles.thumbnailOverlay}>
                 <View style={styles.thumbnailBadge}>
-                  <Ionicons name="sparkles" size={11} color={Colors.accentYellow} />
+                  <Ionicons
+                    name="sparkles"
+                    size={11}
+                    color={Colors.accentYellow}
+                  />
                   <Text style={styles.thumbnailBadgeText}>AI SCANNING</Text>
                 </View>
               </View>
             </View>
           )}
 
-          <AILoadingAnimation size={72} style={{ marginTop: 28, marginBottom: 20 }} />
+          <AILoadingAnimation
+            size={72}
+            style={{ marginTop: 28, marginBottom: 20 }}
+          />
 
           <Text style={styles.analyzingTitle}>Analyzing Soil Sample</Text>
           <Text style={styles.analyzingSubtitle}>
@@ -541,16 +675,18 @@ export default function ScanScreen() {
 
           {/* Progress bar */}
           <View style={styles.progressContainer}>
-            <View style={[styles.progressTrack, { backgroundColor: themeColors.border }]}>
+            <View
+              style={[
+                styles.progressTrack,
+                { backgroundColor: themeColors.border },
+              ]}
+            >
               <Animated.View
                 style={[styles.progressFill, { width: progressWidth as any }]}
               />
               {/* Shimmer dot */}
               <Animated.View
-                style={[
-                  styles.progressDot,
-                  { left: progressWidth as any },
-                ]}
+                style={[styles.progressDot, { left: progressWidth as any }]}
               />
             </View>
             <View style={styles.progressMeta}>
@@ -559,7 +695,9 @@ export default function ScanScreen() {
               >
                 {Math.round(scanProgress > 0 ? scanProgress : 0)}%
               </Animated.Text>
-              <Text style={[styles.progressStatus, { color: themeColors.subText }]}>
+              <Text
+                style={[styles.progressStatus, { color: themeColors.subText }]}
+              >
                 Processing…
               </Text>
             </View>
@@ -664,7 +802,8 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "center",
     paddingHorizontal: 16,
-    paddingTop: Platform.OS === "ios" ? 56 : (StatusBar.currentHeight ?? 24) + 12,
+    paddingTop:
+      Platform.OS === "ios" ? 56 : (StatusBar.currentHeight ?? 24) + 12,
     paddingBottom: 14,
     backgroundColor: "rgba(0,0,0,0.5)",
   },
@@ -689,20 +828,34 @@ const styles = StyleSheet.create({
   cameraWrapper: { flex: 1, backgroundColor: "#000" },
   camera: { flex: 1 },
   topOverlay: {
-    position: "absolute", top: 0, left: 0, right: 0, height: 140,
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 140,
     backgroundColor: "rgba(0,0,0,0.4)",
   },
   bottomOverlay: {
-    position: "absolute", bottom: 0, left: 0, right: 0, height: 210,
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: 210,
     backgroundColor: "rgba(0,0,0,0.55)",
   },
   leftOverlay: {
-    position: "absolute", top: 140, bottom: 210, left: 0,
+    position: "absolute",
+    top: 140,
+    bottom: 210,
+    left: 0,
     width: (width - FRAME_SIZE) / 2,
     backgroundColor: "rgba(0,0,0,0.3)",
   },
   rightOverlay: {
-    position: "absolute", top: 140, bottom: 210, right: 0,
+    position: "absolute",
+    top: 140,
+    bottom: 210,
+    right: 0,
     width: (width - FRAME_SIZE) / 2,
     backgroundColor: "rgba(0,0,0,0.3)",
   },
@@ -742,10 +895,34 @@ const styles = StyleSheet.create({
     borderWidth: 2.5,
     borderColor: Colors.lightGreen,
   },
-  cornerTL: { top: 0, left: 0, borderRightWidth: 0, borderBottomWidth: 0, borderTopLeftRadius: 4 },
-  cornerTR: { top: 0, right: 0, borderLeftWidth: 0, borderBottomWidth: 0, borderTopRightRadius: 4 },
-  cornerBL: { bottom: 0, left: 0, borderRightWidth: 0, borderTopWidth: 0, borderBottomLeftRadius: 4 },
-  cornerBR: { bottom: 0, right: 0, borderLeftWidth: 0, borderTopWidth: 0, borderBottomRightRadius: 4 },
+  cornerTL: {
+    top: 0,
+    left: 0,
+    borderRightWidth: 0,
+    borderBottomWidth: 0,
+    borderTopLeftRadius: 4,
+  },
+  cornerTR: {
+    top: 0,
+    right: 0,
+    borderLeftWidth: 0,
+    borderBottomWidth: 0,
+    borderTopRightRadius: 4,
+  },
+  cornerBL: {
+    bottom: 0,
+    left: 0,
+    borderRightWidth: 0,
+    borderTopWidth: 0,
+    borderBottomLeftRadius: 4,
+  },
+  cornerBR: {
+    bottom: 0,
+    right: 0,
+    borderLeftWidth: 0,
+    borderTopWidth: 0,
+    borderBottomRightRadius: 4,
+  },
   crosshairH: {
     position: "absolute",
     width: 50,
@@ -1012,5 +1189,40 @@ const styles = StyleSheet.create({
     fontSize: 11,
     marginTop: 16,
     lineHeight: 16,
+  },
+
+  fieldInputCard: {
+    position: "absolute",
+    bottom: 155,
+    left: 20,
+    right: 20,
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 12,
+    borderWidth: 1,
+    gap: 8,
+  },
+  fieldInput: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: "500",
+    paddingVertical: 4,
+  },
+
+  fieldToggleBtn: {
+    position: "absolute",
+    bottom: 135,
+    left: 20,
+    right: 20,
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 12,
+    borderWidth: 1,
+    gap: 6,
+    justifyContent: "center",
   },
 });

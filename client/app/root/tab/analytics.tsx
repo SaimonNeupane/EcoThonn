@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   StyleSheet,
   View,
@@ -6,6 +6,7 @@ import {
   TouchableOpacity,
   Alert,
   Text,
+  ActivityIndicator,
 } from "react-native";
 import {
   EarthyCard,
@@ -14,51 +15,58 @@ import {
   useThemeColors,
 } from "../../../components/DesignSystem";
 import { Ionicons } from "@expo/vector-icons";
+import {
+  getAnalytics,
+  getScanHistory,
+  AnalyticsData,
+  SoilScan,
+} from "../../../services/api";
 
 type TimeframeType = "7D" | "30D" | "6M";
 
 export default function AnalyticsScreen() {
   const themeColors = useThemeColors();
   const [timeframe, setTimeframe] = useState<TimeframeType>("30D");
+  const [analyticsData, setAnalyticsData] = useState<AnalyticsData | null>(
+    null,
+  );
+  const [pastReports, setPastReports] = useState<SoilScan[]>([]);
+  const [loading, setLoading] = useState(true);
+  const userId = "user123"; // TODO: Replace with actual user ID from auth context
 
-  // Mock comparison reports database
-  const pastReports = [
-    {
-      id: "r1",
-      title: "North Field - Sector A",
-      date: "May 20, 2026",
-      score: 85,
-      type: "Sandy Loam",
-    },
-    {
-      id: "r2",
-      title: "East Meadow - Sector B",
-      date: "May 12, 2026",
-      score: 72,
-      type: "Clay Soil",
-    },
-    {
-      id: "r3",
-      title: "Orchard Hill - Sector C",
-      date: "April 28, 2026",
-      score: 48,
-      type: "Silty Soil",
-    },
-    {
-      id: "r4",
-      title: "North Field - Initial",
-      date: "April 15, 2026",
-      score: 65,
-      type: "Sandy Loam",
-    },
-  ];
+  // Fetch analytics data and scan history from backend
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        setLoading(true);
+        const analytics = await getAnalytics(userId);
+        const history = await getScanHistory(userId, 0, 10);
 
-  // NPK data per sector
-  const npkData = [
-    { sector: "North A", N: 78, P: 55, K: 88 },
-    { sector: "East B", N: 52, P: 70, K: 60 },
-    { sector: "Orch C", N: 34, P: 42, K: 38 },
-  ];
+        setAnalyticsData(analytics);
+        setPastReports(history);
+      } catch (error) {
+        console.error("Error fetching analytics:", error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchData();
+  }, []);
+
+  // Transform NPK data from analytics
+  const getNPKData = () => {
+    if (!pastReports || pastReports.length === 0) {
+      return [];
+    }
+
+    return pastReports.slice(0, 3).map((report, idx) => ({
+      sector: report.field_name || `Field ${idx + 1}`,
+      N: parseInt(report.npk_values?.nitrogen?.match(/\d+/)?.[0] || "50"),
+      P: parseInt(report.npk_values?.phosphorus?.match(/\d+/)?.[0] || "50"),
+      K: parseInt(report.npk_values?.potassium?.match(/\d+/)?.[0] || "50"),
+    }));
+  };
 
   const NPK_COLORS = {
     N: "#4CAF7D",
@@ -84,7 +92,17 @@ export default function AnalyticsScreen() {
 
   // NPK grouped bar chart
   const renderNPKChart = () => {
+    const npkData = getNPKData();
     const maxVal = 100;
+
+    if (npkData.length === 0) {
+      return (
+        <View style={{ padding: 20, alignItems: "center" }}>
+          <ThemeText category="body">No scan data available yet</ThemeText>
+        </View>
+      );
+    }
+
     return (
       <View>
         {/* Legend */}
@@ -387,73 +405,90 @@ export default function AnalyticsScreen() {
           </ThemeText>
         </View>
 
-        {pastReports.map((report) => (
-          <EarthyCard key={report.id} style={styles.reportRowCard}>
-            <View style={styles.reportRowLeft}>
-              <View style={styles.reportIconCircle}>
-                <Ionicons
-                  name="document-text-outline"
-                  size={20}
-                  color={Colors.darkGreen}
-                />
-              </View>
-              <View style={{ marginLeft: 12 }}>
-                <ThemeText category="bodyBold">{report.title}</ThemeText>
-                <ThemeText category="caption">
-                  {report.type} • {report.date}
-                </ThemeText>
-              </View>
-            </View>
-
-            <View style={styles.reportRowRight}>
-              <View
-                style={[
-                  styles.reportScoreBadge,
-                  {
-                    backgroundColor:
-                      report.score >= 80
-                        ? Colors.lightGreen + "15"
-                        : report.score >= 60
-                          ? "#FFB30015"
-                          : "#FF704315",
-                  },
-                ]}
-              >
-                <Text
-                  style={[
-                    styles.reportScoreText,
-                    {
-                      color:
-                        report.score >= 80
-                          ? Colors.darkGreen
-                          : report.score >= 60
-                            ? "#FFB300"
-                            : "#FF7043",
-                    },
-                  ]}
-                >
-                  {report.score}%
-                </Text>
-              </View>
-
-              <TouchableOpacity
-                style={styles.downloadRowBtn}
-                onPress={() =>
-                  Alert.alert(
-                    "Download",
-                    `Downloading full report PDF: ${report.title}`,
-                  )
-                }
-              >
-                <Ionicons
-                  name="download-outline"
-                  size={18}
-                  color={themeColors.text}
-                />
-              </TouchableOpacity>
-            </View>
+        {loading ? (
+          <View style={{ padding: 20, alignItems: "center" }}>
+            <ActivityIndicator size="small" color={Colors.darkGreen} />
+          </View>
+        ) : pastReports.length === 0 ? (
+          <EarthyCard style={styles.reportRowCard}>
+            <ThemeText category="body" style={{ textAlign: "center" }}>
+              No scan reports yet
+            </ThemeText>
           </EarthyCard>
-        ))}
+        ) : (
+          pastReports.map((report, index) => (
+            <View key={report.id || `report-${index}`}>
+              <EarthyCard style={styles.reportRowCard}>
+                <View style={styles.reportRowLeft}>
+                  <View style={styles.reportIconCircle}>
+                    <Ionicons
+                      name="document-text-outline"
+                      size={20}
+                      color={Colors.darkGreen}
+                    />
+                  </View>
+                  <View style={{ marginLeft: 12 }}>
+                    <ThemeText category="bodyBold">
+                      {report.field_name || report.soil_type}
+                    </ThemeText>
+                    <ThemeText category="caption">
+                      {report.soil_type} •{" "}
+                      {new Date(report.created_at).toLocaleDateString()}
+                    </ThemeText>
+                  </View>
+                </View>
+
+                <View style={styles.reportRowRight}>
+                  <View
+                    style={[
+                      styles.reportScoreBadge,
+                      {
+                        backgroundColor:
+                          (report.quality_score || 0) >= 80
+                            ? Colors.lightGreen + "15"
+                            : (report.quality_score || 0) >= 60
+                              ? "#FFB30015"
+                              : "#FF704315",
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.reportScoreText,
+                        {
+                          color:
+                            (report.quality_score || 0) >= 80
+                              ? Colors.darkGreen
+                              : (report.quality_score || 0) >= 60
+                                ? "#FFB300"
+                                : "#FF7043",
+                        },
+                      ]}
+                    >
+                      {Math.round(report.quality_score || 0)}%
+                    </Text>
+                  </View>
+
+                  <TouchableOpacity
+                    style={styles.downloadRowBtn}
+                    onPress={() =>
+                      Alert.alert(
+                        "Download",
+                        `Downloading full report PDF for ${report.field_name || report.soil_type}`,
+                      )
+                    }
+                  >
+                    <Ionicons
+                      name="download-outline"
+                      size={18}
+                      color={themeColors.text}
+                    />
+                  </TouchableOpacity>
+                </View>
+              </EarthyCard>
+            </View>
+          ))
+        )}
       </ScrollView>
     </View>
   );

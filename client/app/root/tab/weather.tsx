@@ -356,21 +356,21 @@ export default function WeatherScreen() {
           <ThemeText category="body" style={styles.irrigationAdvisoryText}>
             {shouldSkipIrrigation ? (
               <>
-                "Rain probability rises to{" "}
+                &ldquo;Rain probability rises to{" "}
                 <ThemeText category="bodyBold" style={{ color: Colors.darkGreen }}>
                   {rainProbMonday}% on {getDayName(forecastDays[2]?.date, 2)}
                 </ThemeText>
                 . The advisor suggests skipping irrigation cycles to conserve water.
-                Monitor soil moisture levels and adjust as needed."
+                Monitor soil moisture levels and adjust as needed.&rdquo;
               </>
             ) : (
               <>
-                "Weather conditions are stable with low rain probability (
+                &ldquo;Weather conditions are stable with low rain probability (
                 <ThemeText category="bodyBold" style={{ color: Colors.darkGreen }}>
                   {rainProbMonday}%
                 </ThemeText>
                 ). Maintain standard irrigation schedule. Monitor UV levels for
-                potential increased water needs."
+                potential increased water needs.&rdquo;
               </>
             )}
           </ThemeText>
