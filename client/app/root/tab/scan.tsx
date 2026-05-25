@@ -22,9 +22,10 @@ import {
   useThemeColors,
 } from "../../../components/DesignSystem";
 import { Ionicons } from "@expo/vector-icons";
+import { useInfer } from "../../../hooks/useInfer"; // adjust path as needed
+import { useWeather } from "../../../hooks/useWeather"; // adjust path as needed
 
 const { width } = Dimensions.get("window");
-const BACKEND_URL = "http://192.168.76.203:8000/infer";
 
 type FlashState = "off" | "on" | "auto";
 
@@ -40,7 +41,6 @@ const FLASH_LABELS: Record<FlashState, string> = {
 };
 const FLASH_CYCLE: FlashState[] = ["off", "on", "auto"];
 
-// Scan step definitions with progress values
 const SCAN_STEPS = [
   { text: "Uploading soil sample…", progress: 15 },
   { text: "Preprocessing image…", progress: 35 },
@@ -56,7 +56,6 @@ export default function ScanScreen() {
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const [isScanning, setIsScanning] = useState(false);
   const [scanStepIndex, setScanStepIndex] = useState(0);
-  const [scanProgress, setScanProgress] = useState(0);
   const [flash, setFlash] = useState<FlashState>("off");
   const [facing, setFacing] = useState<"back" | "front">("back");
   const [capturedImageUri, setCapturedImageUri] = useState<string | null>(null);
@@ -64,13 +63,17 @@ export default function ScanScreen() {
   const [showFlashHint, setShowFlashHint] = useState(false);
   const [fieldName, setFieldName] = useState("");
   const [showFieldInput, setShowFieldInput] = useState(false);
+
   const userId = "user123"; // TODO: Replace with actual user ID from auth context
+
+  // ── Hooks ──────────────────────────────────────────────────────────────────
+  const { infer, loading: inferLoading, reset: resetInfer } = useInfer();
+  const { farmContext } = useWeather(); // provides location + weather context for RAG
 
   const cameraRef = useRef<CameraView>(null);
   const scanLineY = useRef(new Animated.Value(0)).current;
   const captureRing = useRef(new Animated.Value(1)).current;
   const progressAnim = useRef(new Animated.Value(0)).current;
-  const overlayAnim = useRef(new Animated.Value(0)).current;
   const stepFadeAnim = useRef(new Animated.Value(1)).current;
   const stepTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -96,7 +99,6 @@ export default function ScanScreen() {
     }
   }, [isScanning, capturedImageUri]);
 
-  // Cleanup step timer on unmount
   useEffect(() => {
     return () => {
       if (stepTimerRef.current) clearInterval(stepTimerRef.current);
@@ -119,7 +121,6 @@ export default function ScanScreen() {
     setScanStepIndex(0);
     stepTimerRef.current = setInterval(() => {
       idx = (idx + 1) % SCAN_STEPS.length;
-      // Fade out → update → fade in
       Animated.timing(stepFadeAnim, {
         toValue: 0,
         duration: 200,
@@ -157,135 +158,95 @@ export default function ScanScreen() {
     }
     setIsScanning(false);
     setCapturedImageUri(null);
-    setScanProgress(0);
     progressAnim.setValue(0);
-  }, [progressAnim]);
+    resetInfer();
+  }, [progressAnim, resetInfer]);
 
   const runAIScan = useCallback(
     async (imageUri: string) => {
       setIsScanning(true);
-      setScanProgress(0);
-      progressAnim.setValue(0);
       setCapturedImageUri(imageUri);
-
-      // Fade in scanning overlay
-      Animated.timing(overlayAnim, {
-        toValue: 1,
-        duration: 350,
-        useNativeDriver: true,
-      }).start();
-
-      // Start cycling step text
+      progressAnim.setValue(0);
+      animateProgress(15);
       cycleStepText();
 
-      try {
-        animateProgress(15);
+      const data = await infer({
+        imageUri,
+        userId,
+        fieldName: fieldName || undefined,
+        farmContext,
+      });
 
-        const formData = new FormData();
-        formData.append("file", {
-          uri: imageUri,
-          name: "soil_sample.jpg",
-          type: "image/jpeg",
-        } as any);
+      if (stepTimerRef.current) {
+        clearInterval(stepTimerRef.current);
+        stepTimerRef.current = null;
+      }
 
-        animateProgress(55);
-
-        // Add userId and fieldName parameters
-        const params = new URLSearchParams();
-        params.append("user_id", userId);
-        if (fieldName) {
-          params.append("field_name", fieldName);
-        }
-
-        const response = await fetch(`${BACKEND_URL}?${params.toString()}`, {
-          method: "POST",
-          body: formData,
-        });
-
-        if (!response.ok) {
-          throw new Error(
-            `Server error ${response.status}. Check your connection.`,
-          );
-        }
-
-        const data = await response.json();
-        console.log("Inference result:", data);
-
-        animateProgress(90);
-
-        if (
-          !data.success ||
-          !data.prediction ||
-          data.prediction === "Unknown"
-        ) {
-          throw new Error(
-            data.error ||
-              "Could not identify the soil type. Try better lighting or a closer shot.",
-          );
-        }
-
-        animateProgress(100);
-        setScanProgress(100);
-
-        // Clean up prediction string ("Red_Soil" → "Red Soil")
-        const formattedPrediction = data.prediction.replace(/_/g, " ");
-
-        setTimeout(() => {
-          if (stepTimerRef.current) clearInterval(stepTimerRef.current);
-          setIsScanning(false);
-          setCapturedImageUri(null);
-
-          router.push({
-            pathname: "/result",
-            params: {
-              prediction: formattedPrediction,
-              confidence: data.confidence_score,
-              imageUri: imageUri,
-              lowConfidence: data.low_confidence ? "true" : "false",
-              scanId: data.scan_id || "",
-            },
-          });
-        }, 900);
-      } catch (error: any) {
-        console.error("Inference Error:", error);
+      if (!data) {
+        // useInfer already set error state; surface it to the user
         resetScanState();
-
-        const msg: string =
-          error.message ?? "Something went wrong. Please try again.";
-
-        // Distinguish network errors from model errors
-        const isNetworkError =
-          msg.includes("Network request failed") ||
-          msg.includes("fetch") ||
-          msg.includes("Server error");
-
         Alert.alert(
-          isNetworkError ? "Connection Error" : "Analysis Failed",
-          isNetworkError
-            ? "Could not reach the AI server. Make sure your backend is running and both devices are on the same network."
-            : msg,
+          "Analysis Failed",
+          "Could not reach the AI server. Make sure your backend is running and both devices are on the same network.",
           [
-            {
-              text: "Try Again",
-              onPress: () => {},
-            },
-            {
-              text: "Pick Different Image",
-              onPress: pickFromGallery,
-              style: "default",
-            },
+            { text: "Try Again", onPress: () => {} },
+            { text: "Pick Different Image", onPress: pickFromGallery },
           ],
         );
+        return;
       }
+
+      if (!data.success || !data.prediction || data.prediction === "Unknown") {
+        resetScanState();
+        Alert.alert(
+          "Analysis Failed",
+          data.error ??
+            "Could not identify the soil type. Try better lighting or a closer shot.",
+          [
+            { text: "Try Again", onPress: () => {} },
+            { text: "Pick Different Image", onPress: pickFromGallery },
+          ],
+        );
+        return;
+      }
+
+      animateProgress(100);
+
+      const formattedPrediction = data.prediction.replace(/_/g, " ");
+      setTimeout(() => {
+        setIsScanning(false);
+        setCapturedImageUri(null);
+
+        router.push({
+          pathname: "/result",
+          params: {
+            prediction: formattedPrediction,
+            confidence: data.confidence_score,
+            imageUri,
+            lowConfidence: data.low_confidence ? "true" : "false",
+            scanId: data.scan_id ?? "",
+            // Forward the full structured RAG payload so ResultScreen
+            // can render everything without a second network round-trip.
+            ragData: data.rag_data
+              ? encodeURIComponent(JSON.stringify(data.rag_data))
+              : "",
+            // Raw NPK props for the NPK chart bars
+            props: data.props
+              ? encodeURIComponent(JSON.stringify(data.props))
+              : "",
+          },
+        });
+      }, 900);
     },
     [
       animateProgress,
       cycleStepText,
-      overlayAnim,
+      infer,
       resetScanState,
       router,
       userId,
       fieldName,
+      farmContext,
     ],
   );
 
@@ -473,18 +434,13 @@ export default function ScanScreen() {
 
           {/* ── SCAN TARGET FRAME ─────────────────────────────────────── */}
           <View style={styles.targetFrame}>
-            {/* Corners */}
             <View style={[styles.corner, styles.cornerTL]} />
             <View style={[styles.corner, styles.cornerTR]} />
             <View style={[styles.corner, styles.cornerBL]} />
             <View style={[styles.corner, styles.cornerBR]} />
-
-            {/* Center reticle */}
             <View style={styles.crosshairH} />
             <View style={styles.crosshairV} />
             <View style={styles.centerRing} />
-
-            {/* Animated scan line */}
             <Animated.View
               style={[
                 styles.scanLine,
@@ -501,7 +457,7 @@ export default function ScanScreen() {
             </Text>
           </View>
 
-          {/* Field name input toggle */}
+          {/* Field name input */}
           {showFieldInput && (
             <View
               style={[
@@ -528,7 +484,6 @@ export default function ScanScreen() {
 
           {/* ── CONTROLS ─────────────────────────────────────────────── */}
           <View style={styles.controlsRow}>
-            {/* Gallery */}
             <TouchableOpacity
               style={styles.sideBtn}
               onPress={pickFromGallery}
@@ -540,7 +495,6 @@ export default function ScanScreen() {
               <Text style={styles.sideBtnLabel}>Gallery</Text>
             </TouchableOpacity>
 
-            {/* Capture */}
             <Animated.View
               style={[
                 styles.captureBtnOuter,
@@ -564,7 +518,6 @@ export default function ScanScreen() {
               </TouchableOpacity>
             </Animated.View>
 
-            {/* Flash */}
             <TouchableOpacity
               style={[
                 styles.sideBtn,
@@ -596,7 +549,7 @@ export default function ScanScreen() {
             </TouchableOpacity>
           </View>
 
-          {/* Field name toggle button */}
+          {/* Field name toggle */}
           <TouchableOpacity
             style={[
               styles.fieldToggleBtn,
@@ -642,7 +595,6 @@ export default function ScanScreen() {
             { backgroundColor: themeColors.bg },
           ]}
         >
-          {/* Soil image thumbnail */}
           {capturedImageUri && (
             <View style={styles.thumbnailCard}>
               <Image
@@ -684,26 +636,13 @@ export default function ScanScreen() {
               <Animated.View
                 style={[styles.progressFill, { width: progressWidth as any }]}
               />
-              {/* Shimmer dot */}
               <Animated.View
                 style={[styles.progressDot, { left: progressWidth as any }]}
               />
             </View>
-            <View style={styles.progressMeta}>
-              <Animated.Text
-                style={[styles.progressPct, { color: Colors.darkGreen }]}
-              >
-                {Math.round(scanProgress > 0 ? scanProgress : 0)}%
-              </Animated.Text>
-              <Text
-                style={[styles.progressStatus, { color: themeColors.subText }]}
-              >
-                Processing…
-              </Text>
-            </View>
           </View>
 
-          {/* Step text with fade animation */}
+          {/* Step text */}
           <Animated.View
             style={[styles.stepContainer, { opacity: stepFadeAnim }]}
           >
@@ -715,7 +654,27 @@ export default function ScanScreen() {
             </View>
           </Animated.View>
 
-          {/* Soil class chips (visual decoration) */}
+          {/* Weather context indicator */}
+          {farmContext && (
+            <View style={styles.weatherContext}>
+              <Ionicons
+                name="cloud-outline"
+                size={12}
+                color={Colors.lightGreen}
+              />
+              <Text
+                style={[
+                  styles.weatherContextText,
+                  { color: themeColors.subText },
+                ]}
+              >
+                {farmContext.location.name} ·{" "}
+                {farmContext.current.temperature_c}°C ·{" "}
+                {farmContext.season.label}
+              </Text>
+            </View>
+          )}
+
           <View style={styles.classChipsRow}>
             {["Alluvial", "Red", "Black", "Laterite", "Arid"].map((c) => (
               <View key={c} style={styles.classChip}>
@@ -739,7 +698,6 @@ const FRAME_SIZE = Math.min(width * 0.68, 270);
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#000" },
 
-  // Permission
   permissionContainer: {
     flex: 1,
     alignItems: "center",
@@ -791,7 +749,6 @@ const styles = StyleSheet.create({
   },
   permissionGalleryText: { color: Colors.darkGreen, marginLeft: 6 },
 
-  // Header
   header: {
     position: "absolute",
     top: 0,
@@ -824,7 +781,6 @@ const styles = StyleSheet.create({
   },
   headerTitle: { color: Colors.white, fontWeight: "800" },
 
-  // Camera
   cameraWrapper: { flex: 1, backgroundColor: "#000" },
   camera: { flex: 1 },
   topOverlay: {
@@ -875,7 +831,6 @@ const styles = StyleSheet.create({
   },
   flashHintText: { color: "#fff", fontSize: 12, fontWeight: "600" },
 
-  // Target frame
   targetFrame: {
     position: "absolute",
     top: "50%",
@@ -978,7 +933,6 @@ const styles = StyleSheet.create({
     marginLeft: 2,
   },
 
-  // Controls
   controlsRow: {
     position: "absolute",
     bottom: 55,
@@ -1043,7 +997,6 @@ const styles = StyleSheet.create({
     borderColor: "rgba(255,255,255,0.12)",
   },
 
-  // Analyzing state
   analyzingContainer: {
     flex: 1,
     alignItems: "center",
@@ -1130,13 +1083,6 @@ const styles = StyleSheet.create({
     shadowRadius: 6,
     elevation: 4,
   },
-  progressMeta: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginTop: 8,
-  },
-  progressPct: { fontSize: 13, fontWeight: "800" },
-  progressStatus: { fontSize: 12, fontWeight: "500" },
 
   stepContainer: { alignItems: "center", marginVertical: 4 },
   stepBadge: {
@@ -1160,6 +1106,18 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: "600",
     color: Colors.darkGreen,
+  },
+
+  weatherContext: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    marginTop: 8,
+    marginBottom: 4,
+  },
+  weatherContextText: {
+    fontSize: 11,
+    fontWeight: "500",
   },
 
   classChipsRow: {
