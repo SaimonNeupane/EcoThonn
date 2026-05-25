@@ -17,10 +17,9 @@ from app.services.soil_scan_service import SoilScanService
 app = FastAPI(
     title="EcoThonn Soil Analysis API",
     description="AI-powered soil scanning and analysis platform",
-    version="1.0.0"
+    version="1.0.0",
 )
 
-# FIX 1: Single CORS middleware — duplicate was registered twice before
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -29,7 +28,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include API routes
 app.include_router(api_router)
 
 # ── Model setup ───────────────────────────────────────────────────────────────
@@ -53,7 +51,7 @@ class_names = [
     "Mountain_Soil", "Red_Soil", "Yellow_Soil",
 ]
 
-# ── Soil property lookup ──────────────────────────────────────────────────────
+# ── Soil property lookup (NPK only — everything else comes from RAG) ──────────
 SOIL_PROFILES = {
     "Alluvial_Soil": {"pH_range": "6.5 - 8.4", "Nitrogen_N": "Low to Medium",  "Phosphorus_P": "Low",            "Potassium_K": "High"},
     "Arid_Soil":     {"pH_range": "7.0 - 9.0", "Nitrogen_N": "Very Low",        "Phosphorus_P": "Normal to High", "Potassium_K": "Adequate"},
@@ -65,22 +63,11 @@ SOIL_PROFILES = {
 }
 
 
-# FIX 2: All parameters are now properly declared as function arguments.
-#         Previously the environmental/RAG params were defined AFTER the
-#         opening brace of the body (after the docstring), which is a
-#         SyntaxError. They are now Query() params so they can be passed
-#         from the frontend as query-string arguments.
-# FIX 3: Removed the git merge-conflict marker (<<<<<<< / ======= / >>>>>>>)
-#         that was left in the middle of the function body.
-# FIX 4: Response shape now matches what api.ts InferenceResult expects:
-#         { prediction, confidence_score, props: {pH_range, Nitrogen_N, ...},
-#           success, low_confidence, scan_id?, saved? }
 @app.post("/infer")
 async def run_inference(
     file: UploadFile = File(...),
     user_id: str = Query(default=None),
     field_name: str = Query(default=None),
-    # Environmental context — passed as query-string params from the frontend
     location: str = Query(default="Kathmandu, Nepal"),
     elevation_m: float = Query(default=1340),
     temp_celsius: float = Query(default=25),
@@ -93,24 +80,23 @@ async def run_inference(
     db: AsyncIOMotorDatabase = Depends(get_db),
 ):
     """
-    Perform soil inference on an uploaded image and optionally save results to database.
+    Classify a soil image with EfficientNet-b0 then run RAG + Qwen2.5 to
+    produce a fully structured agronomic report.
 
-    Parameters:
-    - file: Image file to analyze
-    - user_id: Optional — if provided the scan is saved to the database
-    - field_name: Optional label for this scan
-    - location / elevation_m / temp_celsius / …: Environmental context for RAG
+    All display fields (health_score, pH, moisture, crops, treatments,
+    risk_factors, field_advice …) come from the LLM — the frontend has
+    no static fallbacks.
     """
 
-    # ── 1. Classify the image ─────────────────────────────────────────────────
+    # ── 1. Classify image ─────────────────────────────────────────────────────
     image_bytes = await file.read()
     image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
-    input_tensor = transform(image).unsqueeze(0).to(device)
+    tensor = transform(image).unsqueeze(0).to(device)
 
     with torch.inference_mode():
-        outputs = model(input_tensor)
-        probabilities = torch.softmax(outputs, dim=1)
-        confidence, predicted_idx = torch.max(probabilities, 1)
+        outputs = model(tensor)
+        probs = torch.softmax(outputs, dim=1)
+        confidence, predicted_idx = torch.max(probs, 1)
 
     conf_score = confidence.item()
     soil_type = class_names[predicted_idx.item()]
@@ -118,23 +104,22 @@ async def run_inference(
 
     print(f"Predicted: {soil_type} | Confidence: {conf_score * 100:.2f}%", flush=True)
 
-    # ── 2. Low confidence — return early, skip RAG ────────────────────────────
+    # ── 2. Low confidence — skip RAG ─────────────────────────────────────────
     if conf_score <= 0.40:
         return {
             "success": False,
             "prediction": "Unknown",
             "confidence_score": round(conf_score * 100, 2),
             "low_confidence": True,
-            # FIX 4: keep props key so frontend never crashes on undefined
             "props": {},
-            "error": "Image quality too low to identify soil type. Try better lighting.",
-            "rag_advice": None,
+            "rag_data": None,
             "scan_id": None,
             "saved": False,
+            "error": "Image quality too low to identify soil type. Try better lighting.",
         }
 
-    # ── 3. High confidence — run RAG ──────────────────────────────────────────
-    rag_advice = ask(SoilSenseInput(
+    # ── 3. Run RAG — returns fully structured dict ────────────────────────────
+    rag_data: dict = ask(SoilSenseInput(
         soil_type=soil_type,
         confidence=conf_score,
         location=location,
@@ -148,7 +133,7 @@ async def run_inference(
         query=query,
     ))
 
-    # ── 4. Optionally save to database ────────────────────────────────────────
+    # ── 4. Optionally persist scan ────────────────────────────────────────────
     scan_id = None
     saved = False
 
@@ -165,9 +150,13 @@ async def run_inference(
                     "phosphorus": soil_props.get("Phosphorus_P"),
                     "potassium": soil_props.get("Potassium_K"),
                 },
-                health_status=SoilHealthStatus.GOOD if conf_score >= 0.70 else SoilHealthStatus.FAIR,
+                health_status=(
+                    SoilHealthStatus.GOOD if conf_score >= 0.70
+                    else SoilHealthStatus.FAIR
+                ),
                 quality_score=round(conf_score * 100, 2),
-                recommendations=[rag_advice] if rag_advice else [],
+                # Persist the RAG field advice as the recommendation text
+                recommendations=[rag_data.get("field_advice", "")] if rag_data.get("field_advice") else [],
                 field_name=field_name,
             )
             saved_scan = await service.create_scan(scan_create)
@@ -176,15 +165,30 @@ async def run_inference(
         except Exception as e:
             print(f"Warning: failed to save scan to DB: {e}", flush=True)
 
-    # ── 5. Return everything to the frontend ──────────────────────────────────
-    # FIX 4: response uses "props" key matching InferenceResult in api.ts
+    # ── 5. Return full structured payload ─────────────────────────────────────
     return {
         "success": True,
         "prediction": soil_type,
         "confidence_score": round(conf_score * 100, 2),
         "low_confidence": conf_score < 0.50,
-        "props": soil_props,          # { pH_range, Nitrogen_N, Phosphorus_P, Potassium_K }
-        "rag_advice": rag_advice,
+        # Raw NPK props (qualitative strings) for the NPK chart
+        "props": soil_props,
+        # Everything the frontend renders — entirely LLM-generated
+        "rag_data": {
+            "health_score":     rag_data.get("health_score"),
+            "ph_value":         rag_data.get("ph_value"),
+            "ph_label":         rag_data.get("ph_label"),
+            "ph_status":        rag_data.get("ph_status"),
+            "moisture_pct":     rag_data.get("moisture_pct"),
+            "moisture_label":   rag_data.get("moisture_label"),
+            "classification":   rag_data.get("classification"),
+            "ai_summary":       rag_data.get("ai_summary"),
+            "crops":            rag_data.get("crops", []),
+            "treatments":       rag_data.get("treatments", []),
+            "npk_warning":      rag_data.get("npk_warning"),
+            "risk_factors":     rag_data.get("risk_factors", []),
+            "field_advice":     rag_data.get("field_advice", ""),
+        },
         "scan_id": scan_id,
         "saved": saved,
     }
